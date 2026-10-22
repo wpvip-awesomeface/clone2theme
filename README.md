@@ -45,7 +45,7 @@ error, then fall back to the plain conversion and land in "needs a human".
 
 - Cache: `cache/ai/<sha256 of model, prompt version, html, palette, screenshot>.json`. A section is never paid for twice, and cache hits work offline.
 - Token cap: `--ai-budget` per run (input + output, tracked in `runs/<slug>/ai-usage.json`). Calls that won't fit are skipped, not truncated.
-- Credentials: `ANTHROPIC_API_KEY` (or an `ant auth login` profile). Without them the pass is skipped with one report line.
+- Credentials: `ANTHROPIC_API_KEY` in `.env` next to `package.json` (copy `.env.example`; gitignored), the shell env, or an `ant auth login` profile. Without them the pass is skipped with one report line.
 
 ## Match scores
 

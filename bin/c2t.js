@@ -3,7 +3,7 @@
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { execFileSync } from 'node:child_process';
-import { STEPS, step, runDir, slugify, exists, read, write, log } from '../src/guard.js';
+import { STEPS, ROOT, step, runDir, slugify, exists, read, write, log } from '../src/guard.js';
 import { capture } from '../src/capture.js';
 import { extract } from '../src/extract.js';
 import { convert } from '../src/convert.js';
@@ -12,6 +12,9 @@ import { push } from '../src/push.js';
 import { verify } from '../src/verify.js';
 import { report } from '../src/report.js';
 import { CLOSE } from '../src/verify.js';
+
+// Local secrets (ANTHROPIC_API_KEY) live in .env next to package.json; never committed.
+if (exists(path.join(ROOT, '.env'))) process.loadEnvFile(path.join(ROOT, '.env'));
 
 const FNS = { capture, extract, convert, build, push, verify };
 const HELP = `c2t run <url> [--site vip-local] [--run slug] [--no-ai] [--ai-budget tokens] [--fresh] [--until step]
