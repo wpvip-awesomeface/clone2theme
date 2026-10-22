@@ -1,0 +1,11 @@
+{
+  "name": "clone2theme",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Clone a live page into a WordPress block theme on a VIP dev-env.",
+  "bin": { "c2t": "bin/c2t.js" },
+  "dependencies": {
+    "playwright-core": "1.61.0"
+  }
+}

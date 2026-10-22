@@ -1,0 +1,91 @@
+#!/usr/bin/env node
+// clone2theme: live page -> WordPress block theme on a local VIP dev-env.
+import path from 'node:path';
+import { parseArgs } from 'node:util';
+import { execFileSync } from 'node:child_process';
+import { STEPS, step, runDir, slugify, exists, read, write, log } from '../src/guard.js';
+import { capture } from '../src/capture.js';
+import { extract } from '../src/extract.js';
+import { convert } from '../src/convert.js';
+import { build } from '../src/build.js';
+import { push } from '../src/push.js';
+import { verify } from '../src/verify.js';
+import { report } from '../src/report.js';
+
+const FNS = { capture, extract, convert, build, push, verify };
+const HELP = `c2t run <url> [--site vip-local] [--run slug] [--no-ai] [--fresh] [--until step]
+c2t step <${STEPS.join('|')}> --run <slug> [--section n] [--only]
+c2t open <slug>
+c2t list
+
+steps cache in runs/<slug>/<step>/done.json. "step X" reruns X and everything after it
+(--only: just X). report.json is the small summary to read; report.html is the visual check.`;
+
+const { values: o, positionals: [cmd, arg] } = parseArgs({
+  allowPositionals: true,
+  options: {
+    site: { type: 'string' }, run: { type: 'string' }, section: { type: 'string' }, until: { type: 'string' },
+    'no-ai': { type: 'boolean' }, fresh: { type: 'boolean' }, only: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
+  },
+});
+
+async function pipeline(ctx, to = STEPS.length - 1) {
+  for (const name of STEPS.slice(0, to + 1)) {
+    try {
+      await step(ctx, name, (dir) => FNS[name](ctx, dir));
+    } catch (e) {
+      log(name, `FAILED: ${e.message.split('\n')[0]}`);
+      write(path.join(ctx.dir, name, 'error.txt'), e.stack || e.message);
+      report(ctx);
+      process.exitCode = 1;
+      break;
+    }
+  }
+  const r = report(ctx);
+  log('report', path.join(ctx.dir, 'report.html'));
+  console.log(JSON.stringify({ run: r.run, steps: r.steps, local: r.local, needsHuman: r.needsHuman.length }, null, 0));
+}
+
+function loadCtx(run) {
+  const file = path.join(runDir(run), 'run.json');
+  if (!exists(file)) throw new Error(`no run "${run}" (c2t list)`);
+  const meta = read(file);
+  return { ...meta, run, dir: runDir(run), force: new Set(), noAi: o['no-ai'] ?? meta.noAi };
+}
+
+try {
+  if (!cmd || o.help) {
+    console.log(HELP);
+  } else if (cmd === 'run') {
+    if (!arg) throw new Error('usage: c2t run <url>');
+    const url = new URL(arg).href;
+    const run = o.run || slugify(url);
+    const meta = { url, site: o.site || 'vip-local', noAi: !!o['no-ai'] };
+    write(path.join(runDir(run), 'run.json'), meta);
+    const ctx = { ...meta, run, dir: runDir(run), force: new Set(o.fresh ? STEPS : []) };
+    await pipeline(ctx, o.until ? STEPS.indexOf(o.until) : undefined);
+  } else if (cmd === 'step') {
+    const i = STEPS.indexOf(arg);
+    if (i < 0 || !o.run) throw new Error(`usage: c2t step <${STEPS.join('|')}> --run <slug>`);
+    const ctx = loadCtx(o.run);
+    ctx.section = o.section;
+    ctx.force = new Set(o.only ? [arg] : STEPS.slice(i));
+    await pipeline(ctx, o.only ? i : undefined);
+  } else if (cmd === 'open') {
+    const file = path.join(runDir(arg || ''), 'report.html');
+    if (!exists(file)) throw new Error(`no report at ${file}`);
+    execFileSync('open', [file]);
+  } else if (cmd === 'list') {
+    const fs = await import('node:fs');
+    for (const d of fs.readdirSync(path.join(runDir(''))).filter((d) => exists(path.join(runDir(d), 'run.json')))) {
+      const r = exists(path.join(runDir(d), 'report.json')) ? read(path.join(runDir(d), 'report.json')) : null;
+      console.log(`${d}\t${read(path.join(runDir(d), 'run.json')).url}\t${r?.local || '-'}`);
+    }
+  } else {
+    console.log(HELP);
+    process.exitCode = 1;
+  }
+} catch (e) {
+  console.error(`c2t: ${e.message}`);
+  process.exitCode = 1;
+}
