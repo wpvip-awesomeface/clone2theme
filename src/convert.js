@@ -52,6 +52,8 @@ export async function convert(ctx, dir) {
           const o = await page.evaluate(toBlocks, { ...base, aiMarkup: r.markup });
           if (o.aiError) throw new Error(o.aiError);
           if (o.total && o.unclear / o.total > 0.3) throw new Error(`${o.unclear} of ${o.total} blocks were raw HTML`);
+          const lost = fidelity(html, r.markup);
+          if (lost) throw new Error(lost);
           return { ...o, pattern: r.pattern, cached: r.cached };
         }, 1);
         if (got.status === 'needs-human') {
@@ -85,6 +87,19 @@ export async function convert(ctx, dir) {
     unclear: results.filter((r) => r.unclear).map((r) => r.id),
     ai: { ...b.state, used: results.filter((r) => r.ai?.startsWith(MODEL)).map((r) => r.id) },
   };
+}
+
+// Content check for AI answers: every image kept, nearly all words kept.
+function fidelity(html, markup) {
+  const srcs = (h) => new Set([...h.matchAll(/(?:src="|"url":")([^"]+)/g)].map((m) => m[1]));
+  const words = (h) => (h.replace(/<!--[\s\S]*?-->/g, ' ').replace(/<[^>]+>/g, ' ').match(/[\p{L}\p{N}’']+/gu) || []).length;
+  const out = srcs(markup);
+  const missing = [...srcs(html)].filter((u) => !out.has(u)).length;
+  const kept = words(markup) / Math.max(1, words(html));
+  const problems = [];
+  if (missing) problems.push(`${missing} images from the HTML are missing`);
+  if (kept < 0.9) problems.push(`only ${Math.round(kept * 100)}% of the text is present`);
+  return problems.length ? `content dropped: ${problems.join(', ')}. Include every image and all text, even if the section is long.` : null;
 }
 
 // Runs in the block editor page.
