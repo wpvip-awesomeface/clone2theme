@@ -23,7 +23,7 @@ Options: `--site <dev-env slug>` (default `vip-local`), `--run <slug>`, `--fresh
 | convert | flattens wrappers, then WordPress's own `wp.blocks.rawHandler` in the dev-env editor | `convert/blocks/*.html` |
 | build | starter theme + `theme.json` from tokens; header/footer sections become template parts | `build/theme/` |
 | push | own subsite `c2t-<slug>.<env>.vipdev.lndo.site`, theme copy + activate, media import, URL rewrite, Home page | `push/state.json` |
-| verify | screenshot of the local clone, broken images | `verify/full.png` |
+| verify | screenshots each local section, pixelmatch vs the original, broken images | `verify/sections/`, `verify/diff/` |
 
 Every step writes `done.json`; reruns skip finished steps. Failures land in `<step>/error.txt` and the report.
 
@@ -35,7 +35,13 @@ Every step writes `done.json`; reruns skip finished steps. Failures land in `<st
 - SVG images stay hotlinked (WordPress blocks SVG uploads). Forms, iframes and inline SVG are dropped.
 - `--no-ai` output is content-accurate but linear (no columns/cards). Haiku pattern matching for those is build step 4.
 
+## Match scores
+
+Both sides are scaled to 320px wide in the original's shape, then pixelmatch (threshold 0.05) runs.
+Score = share of content pixels that match (flat background is ignored) × sqrt of the height ratio.
+pass ≥ 85%, close ≥ 65%, otherwise fail. An original compared with itself scores 100%.
+`--no-ai` clones score low on purpose: the layout is linear, so the score is a to-do list, not a grade.
+
 ## Not built yet
 
-- Per-section pixel diff scores (pixelmatch) in verify.
 - Haiku for unclear sections, cached by section hash, with a token cap.

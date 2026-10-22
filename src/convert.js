@@ -31,7 +31,7 @@ export async function convert(ctx, dir) {
         continue;
       }
       const html = fs.readFileSync(path.join(exDir, 'sections', `${s.id}.html`), 'utf8');
-      const out = await page.evaluate(toBlocks, { html, bg: s.bg, role: s.role });
+      const out = await page.evaluate(toBlocks, { html, bg: s.bg, bgColor: s.bgColor, role: s.role });
       write(path.join(dir, 'blocks', `${s.id}.html`), out.markup);
       const unclearShare = out.total ? out.unclear / out.total : 1;
       results.push({
@@ -52,7 +52,7 @@ export async function convert(ctx, dir) {
 }
 
 // Runs in the block editor page.
-function toBlocks({ html, bg, role }) {
+function toBlocks({ html, bg, bgColor, role }) {
   const { rawHandler, createBlock, serialize } = wp.blocks;
 
   // rawHandler keeps nested wrappers as raw HTML, so flatten to a run of real blocks first.
@@ -114,7 +114,17 @@ function toBlocks({ html, bg, role }) {
         tagName: role === 'header' ? 'header' : role === 'footer' ? 'footer' : 'section',
         align: 'full',
         layout: { type: 'constrained' },
-        style: { spacing: { padding: { top: 'var:preset|spacing|50', bottom: 'var:preset|spacing|50' } } },
+        style: {
+          spacing: { padding: { top: 'var:preset|spacing|50', bottom: 'var:preset|spacing|50' } },
+          ...(solid(bgColor) ? { color: { background: solid(bgColor) } } : {}),
+        },
       }, inner);
   return { markup: serialize([block]), total, unclear, counts };
+
+  // Section background as hex, skipping transparent ones.
+  function solid(c) {
+    const [r, g, b, a = 1] = (c || '').match(/[\d.]+/g)?.map(Number) || [];
+    if (r === undefined || a < 0.5) return null;
+    return '#' + [r, g, b].map((v) => Math.round(v).toString(16).padStart(2, '0')).join('');
+  }
 }

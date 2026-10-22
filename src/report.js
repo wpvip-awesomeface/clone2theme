@@ -1,6 +1,7 @@
 // report.json (small, for Claude) + report.html (side-by-side visual check, for humans).
 import path from 'node:path';
 import { STEPS, exists, read, write } from './guard.js';
+import { CLOSE } from './verify.js';
 
 export function report(ctx) {
   const get = (name) => (exists(path.join(ctx.dir, name, 'done.json')) ? read(path.join(ctx.dir, name, 'done.json')) : null);
@@ -14,6 +15,9 @@ export function report(ctx) {
   }
   if (s.push?.mediaMissing) needsHuman.push({ why: `${s.push.mediaMissing} images did not import` });
   if (s.verify?.brokenImages?.length) needsHuman.push({ why: `${s.verify.brokenImages.length} broken images on the local page` });
+  const scores = Object.fromEntries((s.verify?.sections || []).map((v) => [v.id, v]));
+  const failing = (s.verify?.sections || []).filter((v) => v.status === 'fail');
+  if (failing.length) needsHuman.push({ why: `${failing.length} of ${s.verify.sections.length} sections look different (below ${Math.round(CLOSE * 100)}% match): ${failing.map((v) => v.id).join(', ')}` });
   if (s.verify && s.verify.status !== 200) needsHuman.push({ why: `local page returned HTTP ${s.verify.status}` });
 
   const data = {
@@ -22,17 +26,19 @@ export function report(ctx) {
     steps: Object.fromEntries(STEPS.map((n) => [n, s[n] ? 'done' : 'pending'])),
     local: s.push?.siteUrl || null,
     theme: s.push?.themePath || s.build?.themeDir || null,
-    sections: sections.map((x) => ({ id: x.id, role: x.role, heading: x.heading, blocks: conv[x.id]?.blocks ?? null, unclear: conv[x.id]?.unclear ?? null })),
+    sections: sections.map((x) => ({ id: x.id, role: x.role, heading: x.heading, blocks: conv[x.id]?.blocks ?? null, unclear: conv[x.id]?.unclear ?? null, score: scores[x.id]?.score ?? null, match: scores[x.id]?.status ?? null })),
+    scores: s.verify ? { page: s.verify.pageScore, avg: s.verify.avgScore, passing: s.verify.passing, of: s.verify.sections.length } : null,
     needsHuman,
   };
   write(path.join(ctx.dir, 'report.json'), data);
-  write(path.join(ctx.dir, 'report.html'), html(data, s, sections, conv));
+  write(path.join(ctx.dir, 'report.html'), html(data, s, sections, conv, scores));
   return data;
 }
 
 const e = (v) => String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
-function html(d, s, sections, conv) {
+function html(d, s, sections, conv, scores) {
+  const pct = (n) => (n == null ? '–' : `${Math.round(n * 100)}%`);
   const palette = s.extract?.tokens?.palette || [];
   const fonts = s.extract?.tokens?.fonts || [];
   const steps = Object.entries(d.steps).map(([k, v]) => `<li class="${v}">${k}</li>`).join('');
@@ -41,10 +47,13 @@ function html(d, s, sections, conv) {
     : '<p class="ok">nothing needs a human right now.</p>';
   const cards = sections.map((x) => {
     const c = conv[x.id];
+    const v = scores[x.id];
     const badge = !c ? '<span class="badge wait">not converted</span>' : c.unclear ? '<span class="badge bad">needs review</span>' : '<span class="badge good">converted</span>';
     const counts = c ? Object.entries(c.counts).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${e(k.replace('core/', ''))} ${v}`).join(' · ') : '';
     return `<article class="card"><header><h3>${e(x.id)} · ${e(x.role)}${x.heading ? ` · ${e(x.heading)}` : ''}</h3>${badge}</header>
-      <img loading="lazy" src="capture/sections/${e(x.id)}.png" alt="original section ${e(x.id)}">
+      ${v ? `<p class="score ${v.status}"><b>${pct(v.score)}</b> match · ${e(v.status)}${v.heightRatio ? ` · height ×${v.heightRatio}` : ''}</p>` : ''}
+      <div class="trio"><figure><figcaption>original</figcaption><img loading="lazy" src="capture/sections/${e(x.id)}.png" alt="original section ${e(x.id)}"></figure>
+      ${v && v.score != null ? `<figure><figcaption>local</figcaption><img loading="lazy" src="verify/sections/${e(x.id)}.png" alt="local section ${e(x.id)}"></figure><figure><figcaption>diff</figcaption><img loading="lazy" src="verify/diff/${e(x.id)}.png" alt="pixel diff ${e(x.id)}"></figure>` : ''}</div>
       <p class="meta">${x.words} words · ${x.images} images · ${x.links} links${c ? ` · ${c.blocks} blocks` : ''}</p>
       ${counts ? `<p class="meta">${counts}</p>` : ''}
       <p class="meta"><a href="extract/sections/${e(x.id)}.html">cleaned html</a>${c ? ` · <a href="convert/blocks/${e(x.id)}.html">block markup</a>` : ''}</p></article>`;
@@ -63,7 +72,9 @@ a{color:inherit}.meta{color:var(--mute);font-size:13px;margin:6px 0}code{font-si
 .swatches{display:flex;flex-wrap:wrap;gap:10px}.sw{display:flex;align-items:center;gap:8px;font-size:13px}.sw i{width:28px;height:28px;border-radius:6px;border:1px solid var(--line);display:inline-block}
 .compare{display:grid;grid-template-columns:1fr 1fr;gap:16px}.compare figure{margin:0;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px;max-height:900px;overflow:auto}
 .compare img,.card img{width:100%;height:auto;display:block;border-radius:6px}figcaption{font-size:13px;color:var(--mute);margin-bottom:8px}
-.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px}.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px}
+.trio{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;align-items:start}.trio figure{margin:0;max-height:420px;overflow:hidden}.trio figcaption{font-size:11px;margin-bottom:4px}
+.score{margin:0 0 8px;font-size:13px}.score.pass{color:var(--good)}.score.close{color:var(--wait)}.score.fail{color:var(--bad)}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:16px}.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px}
 .card header{display:flex;justify-content:space-between;gap:8px;align-items:start;margin-bottom:8px}.card h3{font-size:14px;margin:0}
 .badge{font-size:12px;padding:2px 8px;border-radius:99px;white-space:nowrap;border:1px solid currentColor}.good{color:var(--good)}.bad{color:var(--bad)}.wait{color:var(--wait)}
 @media (max-width:760px){.compare{grid-template-columns:1fr}}
@@ -73,6 +84,7 @@ a{color:inherit}.meta{color:var(--mute);font-size:13px;margin:6px 0}code{font-si
 <h2>needs a human</h2>${issues}
 <h2>design tokens</h2><div class="swatches">${palette.map((p) => `<span class="sw"><i style="background:${e(p.color)}"></i>${e(p.slug)} ${e(p.color)}</span>`).join('')}</div>
 <p class="meta">fonts: ${fonts.map((f) => `${e(f.slug)} = ${e(f.name)}`).join(' · ')} · content width ${e(s.extract?.tokens?.contentSize)}</p>
+${d.scores ? `<h2>match scores</h2><p class="meta">whole page ${pct(d.scores.page)} · section average ${pct(d.scores.avg)} · ${d.scores.passing} of ${d.scores.of} sections pass (≥85%). scores compare pixels after scaling both sides to the original's shape, so layout and height drift both count.</p>` : ''}
 <h2>original vs local</h2><div class="compare"><figure><figcaption>original</figcaption>${s.capture ? '<img loading="lazy" src="capture/full.png" alt="original page">' : ''}</figure><figure><figcaption>local clone</figcaption>${local}</figure></div>
 <h2>sections</h2><div class="cards">${cards}</div>
 </main></body></html>`;

@@ -4,8 +4,12 @@
   "private": true,
   "type": "module",
   "description": "Clone a live page into a WordPress block theme on a VIP dev-env.",
-  "bin": { "c2t": "bin/c2t.js" },
+  "bin": {
+    "c2t": "bin/c2t.js"
+  },
   "dependencies": {
-    "playwright-core": "1.61.0"
+    "pixelmatch": "7.1.0",
+    "playwright-core": "1.61.0",
+    "pngjs": "7.0.0"
   }
 }
