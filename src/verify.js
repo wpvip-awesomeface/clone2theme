@@ -7,6 +7,7 @@ import { launch } from './browser.js';
 import { read } from './guard.js';
 
 const DIFF_WIDTH = 320; // both sides are scaled to this width before diffing
+const COARSE_WIDTH = 48;
 const MAX_DIFF_HEIGHT = 2400;
 export const PASS = 0.85;
 export const CLOSE = 0.65;
@@ -77,22 +78,16 @@ export async function verify(ctx, dir) {
 
 const round = (n) => Math.round(n * 1000) / 1000;
 
-export function diff(origFile, localFile, outFile) {
+export function diff(origFile, localFile, outFile, w = DIFF_WIDTH) {
   const a = PNG.sync.read(fs.readFileSync(origFile));
   const b = PNG.sync.read(fs.readFileSync(localFile));
-  const w = DIFF_WIDTH;
-  const h = Math.max(1, Math.min(MAX_DIFF_HEIGHT, Math.round((a.height * w) / a.width)));
-  const ra = resize(a, w, h);
-  const rb = resize(b, w, h); // stretched to the original's shape, so height drift costs score
-  const out = new PNG({ width: w, height: h });
-  const bad = pixelmatch(ra.data, rb.data, out.data, w, h, { threshold: 0.05, alpha: 0.3 });
-  fs.writeFileSync(outFile, PNG.sync.write(out));
-  // Flat backgrounds would inflate a plain pixel ratio, so only count "ink":
-  // pixels that differ from the original's dominant color in either image.
-  const ink = inkPixels(ra, rb);
-  const pixels = Math.max(0, 1 - bad / Math.max(ink, (w * h) * 0.02));
-  // Stretching hides height drift from pixelmatch, so charge for it directly.
-  const ratio = b.height / a.height || 0;
+  // Fine pass catches text and detail; coarse pass rewards matching layout even when things shift a little.
+  const fine = match(a, b, w, outFile);
+  const coarse = match(a, b, COARSE_WIDTH);
+  const pixels = (fine + coarse) / 2;
+  // pixelmatch only sees the original's height, so charge for height drift directly,
+  // measured on content (trailing empty space doesn't count).
+  const ratio = contentHeight(b) / contentHeight(a) || 0;
   const score = round(pixels * Math.sqrt(Math.min(ratio, 1 / ratio) || 0));
   return {
     score,
@@ -102,18 +97,61 @@ export function diff(origFile, localFile, outFile) {
   };
 }
 
-function inkPixels(a, b) {
+function contentHeight(img) {
+  const s = resize(img, 160, Math.max(1, Math.round((img.height * 160) / img.width)));
+  const bg = dominant(s);
+  for (let y = s.height - 1; y >= 0; y--) {
+    for (let x = 0; x < s.width; x++) if (far(s.data, (y * s.width + x) * 4, bg)) return (y + 1) / s.height * img.height;
+  }
+  return img.height;
+}
+
+function dominant(img) {
   const counts = new Map();
-  for (let i = 0; i < a.data.length; i += 16) {
-    const k = ((a.data[i] >> 4) << 8) | ((a.data[i + 1] >> 4) << 4) | (a.data[i + 2] >> 4);
+  for (let i = 0; i < img.data.length; i += 16) {
+    const k = ((img.data[i] >> 4) << 8) | ((img.data[i + 1] >> 4) << 4) | (img.data[i + 2] >> 4);
     counts.set(k, (counts.get(k) || 0) + 1);
   }
   const mode = [...counts.entries()].sort((x, y) => y[1] - x[1])[0][0];
-  const bg = [((mode >> 8) & 15) * 16 + 8, ((mode >> 4) & 15) * 16 + 8, (mode & 15) * 16 + 8];
-  const far = (d, i) => Math.abs(d[i] - bg[0]) + Math.abs(d[i + 1] - bg[1]) + Math.abs(d[i + 2] - bg[2]) > 48;
+  return [((mode >> 8) & 15) * 16 + 8, ((mode >> 4) & 15) * 16 + 8, (mode & 15) * 16 + 8];
+}
+
+const far = (d, i, bg) => Math.abs(d[i] - bg[0]) + Math.abs(d[i + 1] - bg[1]) + Math.abs(d[i + 2] - bg[2]) > 48;
+
+function inkPixels(a, b) {
+  const bg = dominant(a);
   let n = 0;
-  for (let i = 0; i < a.data.length; i += 4) if (far(a.data, i) || far(b.data, i)) n++;
+  for (let i = 0; i < a.data.length; i += 4) if (far(a.data, i, bg) || far(b.data, i, bg)) n++;
   return n;
+}
+
+// Share of content pixels that match, both sides scaled to the original's shape at width w.
+function match(a, b, w, outFile) {
+  const h = Math.max(1, Math.min(MAX_DIFF_HEIGHT, Math.round((a.height * w) / a.width)));
+  const ra = resize(a, w, h);
+  // Same scale as the original, top-aligned; cut or padded with its own bottom color to the original's height.
+  const hb = Math.max(1, Math.round((b.height * w) / b.width));
+  const rb = fit(resize(b, w, Math.min(hb, MAX_DIFF_HEIGHT * 2)), h);
+  const out = new PNG({ width: w, height: h });
+  const bad = pixelmatch(ra.data, rb.data, out.data, w, h, { threshold: 0.05, alpha: 0.3 });
+  if (outFile) fs.writeFileSync(outFile, PNG.sync.write(out));
+  // Flat backgrounds would inflate a plain pixel ratio, so only count "ink":
+  // pixels that differ from the original's dominant color in either image.
+  return Math.max(0, 1 - bad / Math.max(inkPixels(ra, rb), (w * h) * 0.02));
+}
+
+function fit(src, h) {
+  if (src.height === h) return src;
+  const dst = new PNG({ width: src.width, height: h });
+  const last = (src.height - 1) * src.width * 4;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < src.width; x++) {
+      const o = (y * src.width + x) * 4;
+      const i = y < src.height ? o : last + x * 4;
+      dst.data[o] = src.data[i]; dst.data[o + 1] = src.data[i + 1]; dst.data[o + 2] = src.data[i + 2]; dst.data[o + 3] = src.data[i + 3];
+    }
+  }
+  return dst;
 }
 
 // Area-average downscale (or nearest upscale) to w x h.

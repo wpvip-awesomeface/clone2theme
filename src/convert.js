@@ -3,7 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { launch } from './browser.js';
 import { devenv } from './devenv.js';
-import { read, write, exists } from './guard.js';
+import { read, write, exists, withRetry } from './guard.js';
+import { patternFor, budget, MODEL } from './ai.js';
+import { CLOSE } from './verify.js';
 
 export async function convert(ctx, dir) {
   const exDir = path.join(ctx.dir, 'extract');
@@ -15,6 +17,13 @@ export async function convert(ctx, dir) {
   const siteUrl = env.ensureSite('c2t-converter', 'clone2theme converter');
   const key = env.loginKey();
   if (!key) throw new Error('no dev-env autologin key (vip dev-env info)');
+
+  // AI targets: sections the plain converter left as raw HTML, or that scored low last verify.
+  const palette = read(path.join(exDir, 'tokens.json')).palette;
+  const lastVerify = exists(path.join(ctx.dir, 'verify', 'done.json')) ? read(path.join(ctx.dir, 'verify', 'done.json')) : null;
+  const weak = new Set((lastVerify?.sections || []).filter((v) => v.score !== null && v.score < CLOSE).map((v) => v.id));
+  const aiOn = !ctx.noAi; // cache hits work offline; live calls need credentials
+  const b = budget(ctx);
 
   const browser = await launch({ local: true });
   const results = [];
@@ -31,7 +40,21 @@ export async function convert(ctx, dir) {
         continue;
       }
       const html = fs.readFileSync(path.join(exDir, 'sections', `${s.id}.html`), 'utf8');
-      const out = await page.evaluate(toBlocks, { html, bg: s.bg, bgColor: s.bgColor, role: s.role });
+      const base = { html, bg: s.bg, bgColor: s.bgColor, role: s.role };
+      let out = await page.evaluate(toBlocks, base);
+      const plainUnclear = !html || (out.total ? out.unclear / out.total : 1) > 0.5;
+      let ai = ctx.noAi ? 'skipped (--no-ai)' : 'not needed';
+      if (aiOn && html && (plainUnclear || weak.has(s.id) || only === s.id)) {
+        const got = await withRetry(`ai:${s.id}`, async (lastErr) => {
+          const r = await patternFor({ html, screenshot: path.join(ctx.dir, 'capture', 'sections', `${s.id}.png`), palette, lastError: lastErr?.message, b });
+          const o = await page.evaluate(toBlocks, { ...base, aiMarkup: r.markup });
+          if (o.aiError) throw new Error(o.aiError);
+          if (o.total && o.unclear / o.total > 0.3) throw new Error(`${o.unclear} of ${o.total} blocks were raw HTML`);
+          return { ...o, pattern: r.pattern, cached: r.cached };
+        }, 1);
+        if (got.status === 'needs-human') ai = /no Anthropic credentials/.test(got.error) ? 'skipped (no Anthropic credentials)' : `failed: ${got.error}`;
+        else { out = got; ai = `${MODEL}: ${got.pattern}${got.cached ? ' (cached)' : ''}`; }
+      }
       write(path.join(dir, 'blocks', `${s.id}.html`), out.markup);
       const unclearShare = out.total ? out.unclear / out.total : 1;
       results.push({
@@ -42,18 +65,24 @@ export async function convert(ctx, dir) {
         counts: out.counts,
         unclear: !html || unclearShare > 0.5,
         unclearShare: Math.round(unclearShare * 100) / 100,
-        ai: ctx.noAi ? 'skipped (--no-ai)' : 'not built yet',
+        ai,
       });
     }
   } finally {
     await browser.close();
   }
-  return { converter: siteUrl, sections: results, unclear: results.filter((r) => r.unclear).map((r) => r.id) };
+  b.save();
+  return {
+    converter: siteUrl,
+    sections: results,
+    unclear: results.filter((r) => r.unclear).map((r) => r.id),
+    ai: { ...b.state, used: results.filter((r) => r.ai?.startsWith(MODEL)).map((r) => r.id) },
+  };
 }
 
 // Runs in the block editor page.
-function toBlocks({ html, bg, bgColor, role }) {
-  const { rawHandler, createBlock, serialize } = wp.blocks;
+function toBlocks({ html, bg, bgColor, role, aiMarkup }) {
+  const { rawHandler, createBlock, serialize, parse, getBlockType } = wp.blocks;
 
   // rawHandler keeps nested wrappers as raw HTML, so flatten to a run of real blocks first.
   const BLOCK = /^(H[1-6]|P|UL|OL|TABLE|BLOCKQUOTE|PRE|FIGURE|HR|IMG)$/;
@@ -89,6 +118,18 @@ function toBlocks({ html, bg, bgColor, role }) {
   flush();
 
   let inner = parts.length ? rawHandler({ HTML: parts.join('\n') }) : [];
+  if (aiMarkup) {
+    // Rebuild from parsed names + attributes so small markup slips from the model can't leave invalid blocks.
+    const unknown = new Set();
+    const rebuild = (list) => list.filter((b) => b.name).map((b) => {
+      if (!getBlockType(b.name) || b.name === 'core/missing') { unknown.add(b.attributes?.originalName || b.name); return null; }
+      return createBlock(b.name, b.attributes, rebuild(b.innerBlocks || []));
+    }).filter(Boolean);
+    const rebuilt = rebuild(parse(aiMarkup));
+    if (unknown.size) return { aiError: `unknown blocks: ${[...unknown].join(', ')}` };
+    if (!rebuilt.length) return { aiError: 'markup parsed to zero blocks' };
+    inner = rebuilt;
+  }
   // Keep images at the size they rendered on the original page.
   const widths = Object.fromEntries([...doc.querySelectorAll('img[width]')].map((i) => [i.getAttribute('src'), Number(i.getAttribute('width'))]));
   const size = (list) => list.forEach((b) => {

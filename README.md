@@ -12,7 +12,7 @@ node bin/c2t.js open example-com                         # open report.html
 node bin/c2t.js list
 ```
 
-Options: `--site <dev-env slug>` (default `vip-local`), `--run <slug>`, `--fresh` (ignore cache), `--until <step>`.
+Options: `--site <dev-env slug>` (default `vip-local`), `--run <slug>`, `--fresh` (ignore cache), `--until <step>`, `--ai-budget <tokens>` (default 80000), `--no-ai`.
 
 ## Pipeline
 
@@ -35,10 +35,23 @@ Every step writes `done.json`; reruns skip finished steps. Failures land in `<st
 - SVG images stay hotlinked (WordPress blocks SVG uploads). Forms, iframes and inline SVG are dropped.
 - `--no-ai` output is content-accurate but linear (no columns/cards). Haiku pattern matching for those is build step 4.
 
+## AI pass (Haiku)
+
+Without `--no-ai`, after the first verify, sections that came out as raw HTML or score below 65% go to
+`claude-haiku-5-5` once, with the cleaned HTML plus the original screenshot. It returns block markup
+(structured output), which is parsed and rebuilt with `wp.blocks.createBlock` in the editor so small
+markup slips can't leave invalid blocks. Unknown blocks or mostly-raw-HTML answers get one retry with the
+error, then fall back to the plain conversion and land in "needs a human".
+
+- Cache: `cache/ai/<sha256 of model, prompt version, html, palette, screenshot>.json`. A section is never paid for twice, and cache hits work offline.
+- Token cap: `--ai-budget` per run (input + output, tracked in `runs/<slug>/ai-usage.json`). Calls that won't fit are skipped, not truncated.
+- Credentials: `ANTHROPIC_API_KEY` (or an `ant auth login` profile). Without them the pass is skipped with one report line.
+
 ## Match scores
 
-Both sides are scaled to 320px wide in the original's shape, then pixelmatch (threshold 0.05) runs.
-Score = share of content pixels that match (flat background is ignored) × sqrt of the height ratio.
+Both sides are scaled to the original's width (no stretching), top-aligned, and the local side is cut or
+padded to the original's height. pixelmatch (threshold 0.05) runs at 320px (detail) and 48px (layout).
+Score = average share of content pixels that match (flat background ignored) × sqrt of the content-height ratio.
 pass ≥ 85%, close ≥ 65%, otherwise fail. An original compared with itself scores 100%.
 `--no-ai` clones score low on purpose: the layout is linear, so the score is a to-do list, not a grade.
 

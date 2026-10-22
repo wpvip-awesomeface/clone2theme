@@ -13,6 +13,11 @@ export function report(ctx) {
   for (const c of s.convert?.sections || []) {
     if (c.unclear) needsHuman.push({ section: c.id, why: `mostly raw HTML blocks (${Math.round(c.unclearShare * 100)}%)`, fix: `c2t step convert --run ${ctx.run} --section ${Number(c.id)}` });
   }
+  for (const c of s.convert?.sections || []) {
+    if (c.ai?.startsWith('failed')) needsHuman.push({ section: c.id, why: `AI ${c.ai}`, fix: `c2t step convert --run ${ctx.run} --section ${Number(c.id)}` });
+  }
+  const noKey = (s.convert?.sections || []).filter((c) => c.ai?.includes('no Anthropic credentials'));
+  if (noKey.length) needsHuman.push({ why: `AI pass skipped for ${noKey.length} weak sections: no Anthropic credentials`, fix: `export ANTHROPIC_API_KEY=... && c2t step convert --run ${ctx.run}` });
   if (s.push?.mediaMissing) needsHuman.push({ why: `${s.push.mediaMissing} images did not import` });
   if (s.verify?.brokenImages?.length) needsHuman.push({ why: `${s.verify.brokenImages.length} broken images on the local page` });
   const scores = Object.fromEntries((s.verify?.sections || []).map((v) => [v.id, v]));
@@ -28,6 +33,7 @@ export function report(ctx) {
     theme: s.push?.themePath || s.build?.themeDir || null,
     sections: sections.map((x) => ({ id: x.id, role: x.role, heading: x.heading, blocks: conv[x.id]?.blocks ?? null, unclear: conv[x.id]?.unclear ?? null, score: scores[x.id]?.score ?? null, match: scores[x.id]?.status ?? null })),
     scores: s.verify ? { page: s.verify.pageScore, avg: s.verify.avgScore, passing: s.verify.passing, of: s.verify.sections.length } : null,
+    ai: s.convert?.ai ? { used: s.convert.ai.used, calls: s.convert.ai.calls, cached: s.convert.ai.cached, tokens: s.convert.ai.spent, cap: s.convert.ai.cap } : null,
     needsHuman,
   };
   write(path.join(ctx.dir, 'report.json'), data);
@@ -56,6 +62,7 @@ function html(d, s, sections, conv, scores) {
       ${v && v.score != null ? `<figure><figcaption>local</figcaption><img loading="lazy" src="verify/sections/${e(x.id)}.png" alt="local section ${e(x.id)}"></figure><figure><figcaption>diff</figcaption><img loading="lazy" src="verify/diff/${e(x.id)}.png" alt="pixel diff ${e(x.id)}"></figure>` : ''}</div>
       <p class="meta">${x.words} words · ${x.images} images · ${x.links} links${c ? ` · ${c.blocks} blocks` : ''}</p>
       ${counts ? `<p class="meta">${counts}</p>` : ''}
+      ${c?.ai ? `<p class="meta">ai: ${e(c.ai)}</p>` : ''}
       <p class="meta"><a href="extract/sections/${e(x.id)}.html">cleaned html</a>${c ? ` · <a href="convert/blocks/${e(x.id)}.html">block markup</a>` : ''}</p></article>`;
   }).join('');
   const local = s.verify ? '<img loading="lazy" src="verify/full.png" alt="local clone">' : '<p class="meta">run push + verify to see the local clone.</p>';
@@ -84,6 +91,7 @@ a{color:inherit}.meta{color:var(--mute);font-size:13px;margin:6px 0}code{font-si
 <h2>needs a human</h2>${issues}
 <h2>design tokens</h2><div class="swatches">${palette.map((p) => `<span class="sw"><i style="background:${e(p.color)}"></i>${e(p.slug)} ${e(p.color)}</span>`).join('')}</div>
 <p class="meta">fonts: ${fonts.map((f) => `${e(f.slug)} = ${e(f.name)}`).join(' · ')} · content width ${e(s.extract?.tokens?.contentSize)}</p>
+${d.ai ? `<p class="meta">ai: ${d.ai.used.length ? `Haiku rebuilt ${d.ai.used.join(', ')}` : 'no sections rebuilt'} · ${d.ai.calls} calls, ${d.ai.cached} cached · ${d.ai.tokens.toLocaleString()} of ${d.ai.cap.toLocaleString()} tokens</p>` : ''}
 ${d.scores ? `<h2>match scores</h2><p class="meta">whole page ${pct(d.scores.page)} · section average ${pct(d.scores.avg)} · ${d.scores.passing} of ${d.scores.of} sections pass (≥85%). scores compare pixels after scaling both sides to the original's shape, so layout and height drift both count.</p>` : ''}
 <h2>original vs local</h2><div class="compare"><figure><figcaption>original</figcaption>${s.capture ? '<img loading="lazy" src="capture/full.png" alt="original page">' : ''}</figure><figure><figcaption>local clone</figcaption>${local}</figure></div>
 <h2>sections</h2><div class="cards">${cards}</div>

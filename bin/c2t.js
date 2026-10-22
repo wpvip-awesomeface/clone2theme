@@ -11,25 +11,44 @@ import { build } from '../src/build.js';
 import { push } from '../src/push.js';
 import { verify } from '../src/verify.js';
 import { report } from '../src/report.js';
+import { CLOSE } from '../src/verify.js';
 
 const FNS = { capture, extract, convert, build, push, verify };
-const HELP = `c2t run <url> [--site vip-local] [--run slug] [--no-ai] [--fresh] [--until step]
+const HELP = `c2t run <url> [--site vip-local] [--run slug] [--no-ai] [--ai-budget tokens] [--fresh] [--until step]
 c2t step <${STEPS.join('|')}> --run <slug> [--section n] [--only]
 c2t open <slug>
 c2t list
 
 steps cache in runs/<slug>/<step>/done.json. "step X" reruns X and everything after it
-(--only: just X). report.json is the small summary to read; report.html is the visual check.`;
+(--only: just X). Without --no-ai, sections that convert to raw HTML or score below
+65% after verify go to Haiku once (cached by section hash, capped by --ai-budget). report.json is the small summary to read; report.html is the visual check.`;
 
 const { values: o, positionals: [cmd, arg] } = parseArgs({
   allowPositionals: true,
   options: {
-    site: { type: 'string' }, run: { type: 'string' }, section: { type: 'string' }, until: { type: 'string' },
+    site: { type: 'string' }, 'ai-budget': { type: 'string' }, run: { type: 'string' }, section: { type: 'string' }, until: { type: 'string' },
     'no-ai': { type: 'boolean' }, fresh: { type: 'boolean' }, only: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
   },
 });
 
 async function pipeline(ctx, to = STEPS.length - 1) {
+  await runSteps(ctx, to);
+  // One AI pass: re-convert weak sections now that verify has scored them.
+  const v = exists(path.join(ctx.dir, 'verify', 'done.json')) ? read(path.join(ctx.dir, 'verify', 'done.json')) : null;
+  const conv = exists(path.join(ctx.dir, 'convert', 'done.json')) ? read(path.join(ctx.dir, 'convert', 'done.json')) : null;
+  const weak = (v?.sections || []).filter((x) => x.score !== null && x.score < CLOSE && !conv?.ai?.used?.includes(x.id));
+  if (!process.exitCode && to === STEPS.length - 1 && !ctx.noAi && weak.length && !ctx.aiPass) {
+    log('ai', `pass for ${weak.length} weak sections: ${weak.map((x) => x.id).join(', ')}`);
+    ctx.aiPass = true;
+    ctx.force = new Set(STEPS.slice(STEPS.indexOf('convert')));
+    await runSteps(ctx, to);
+  }
+  const r = report(ctx);
+  log('report', path.join(ctx.dir, 'report.html'));
+  console.log(JSON.stringify({ run: r.run, steps: r.steps, local: r.local, scores: r.scores, ai: r.ai, needsHuman: r.needsHuman.length }, null, 0));
+}
+
+async function runSteps(ctx, to) {
   for (const name of STEPS.slice(0, to + 1)) {
     try {
       await step(ctx, name, (dir) => FNS[name](ctx, dir));
@@ -41,16 +60,13 @@ async function pipeline(ctx, to = STEPS.length - 1) {
       break;
     }
   }
-  const r = report(ctx);
-  log('report', path.join(ctx.dir, 'report.html'));
-  console.log(JSON.stringify({ run: r.run, steps: r.steps, local: r.local, needsHuman: r.needsHuman.length }, null, 0));
 }
 
 function loadCtx(run) {
   const file = path.join(runDir(run), 'run.json');
   if (!exists(file)) throw new Error(`no run "${run}" (c2t list)`);
   const meta = read(file);
-  return { ...meta, run, dir: runDir(run), force: new Set(), noAi: o['no-ai'] ?? meta.noAi };
+  return { ...meta, run, dir: runDir(run), force: new Set(), noAi: o['no-ai'] ?? meta.noAi, aiBudget: Number(o['ai-budget']) || meta.aiBudget };
 }
 
 try {
@@ -60,7 +76,7 @@ try {
     if (!arg) throw new Error('usage: c2t run <url>');
     const url = new URL(arg).href;
     const run = o.run || slugify(url);
-    const meta = { url, site: o.site || 'vip-local', noAi: !!o['no-ai'] };
+    const meta = { url, site: o.site || 'vip-local', noAi: !!o['no-ai'], aiBudget: Number(o['ai-budget']) || undefined };
     write(path.join(runDir(run), 'run.json'), meta);
     const ctx = { ...meta, run, dir: runDir(run), force: new Set(o.fresh ? STEPS : []) };
     await pipeline(ctx, o.until ? STEPS.indexOf(o.until) : undefined);

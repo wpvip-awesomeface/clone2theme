@@ -110,7 +110,9 @@ function analyze() {
     if (s.bg) assetUrls.add(s.bg);
     el.querySelectorAll('*').forEach((n) => {
       if (n.tagName === 'svg' || n.closest('svg')) return;
-      if (!visible(n) && !['BR', 'SOURCE'].includes(n.tagName)) n.setAttribute('data-c2t-hidden', '1');
+      // Closed <details> bodies report a normal computed style, so check for them explicitly.
+      const closed = n.parentElement?.closest('details:not([open])') && !n.closest('summary');
+      if ((closed || !visible(n)) && !['BR', 'SOURCE'].includes(n.tagName)) n.setAttribute('data-c2t-hidden', '1');
       if (n.tagName === 'A' && n.href) n.setAttribute('href', n.href);
       if (n.tagName === 'IMG') {
         const src = n.currentSrc || n.src || n.dataset.src || n.dataset.lazySrc || '';
