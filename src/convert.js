@@ -24,6 +24,7 @@ export async function convert(ctx, dir) {
   const weak = new Set((lastVerify?.sections || []).filter((v) => v.score !== null && v.score < CLOSE).map((v) => v.id));
   const aiOn = !ctx.noAi; // cache hits work offline; live calls need credentials
   const b = budget(ctx);
+  let aiStop = null;
 
   const browser = await launch({ local: true });
   const results = [];
@@ -44,7 +45,8 @@ export async function convert(ctx, dir) {
       let out = await page.evaluate(toBlocks, base);
       const plainUnclear = !html || (out.total ? out.unclear / out.total : 1) > 0.5;
       let ai = ctx.noAi ? 'skipped (--no-ai)' : 'not needed';
-      if (aiOn && html && (plainUnclear || weak.has(s.id) || only === s.id)) {
+      if (aiStop) ai = aiStop;
+      else if (aiOn && html && (plainUnclear || weak.has(s.id) || only === s.id)) {
         const got = await withRetry(`ai:${s.id}`, async (lastErr) => {
           const r = await patternFor({ html, screenshot: path.join(ctx.dir, 'capture', 'sections', `${s.id}.png`), palette, lastError: lastErr?.message, b });
           const o = await page.evaluate(toBlocks, { ...base, aiMarkup: r.markup });
@@ -52,7 +54,12 @@ export async function convert(ctx, dir) {
           if (o.total && o.unclear / o.total > 0.3) throw new Error(`${o.unclear} of ${o.total} blocks were raw HTML`);
           return { ...o, pattern: r.pattern, cached: r.cached };
         }, 1);
-        if (got.status === 'needs-human') ai = /no Anthropic credentials/.test(got.error) ? 'skipped (no Anthropic credentials)' : `failed: ${got.error}`;
+        if (got.status === 'needs-human') {
+          // Credential problems won't fix themselves on the next section: stop calling.
+          if (/no Anthropic credentials/.test(got.error)) aiStop = 'skipped (no Anthropic credentials)';
+          else if (/authentication_error|invalid x-api-key|^401/.test(got.error)) aiStop = 'skipped (Anthropic rejected the API key)';
+          ai = aiStop || `failed: ${got.error}`;
+        }
         else { out = got; ai = `${MODEL}: ${got.pattern}${got.cached ? ' (cached)' : ''}`; }
       }
       write(path.join(dir, 'blocks', `${s.id}.html`), out.markup);

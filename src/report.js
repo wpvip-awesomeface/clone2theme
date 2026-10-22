@@ -17,6 +17,8 @@ export function report(ctx) {
     if (c.ai?.startsWith('failed')) needsHuman.push({ section: c.id, why: `AI ${c.ai}`, fix: `c2t step convert --run ${ctx.run} --section ${Number(c.id)}` });
   }
   const noKey = (s.convert?.sections || []).filter((c) => c.ai?.includes('no Anthropic credentials'));
+  const badKey = (s.convert?.sections || []).filter((c) => c.ai?.includes('rejected the API key'));
+  if (badKey.length) needsHuman.push({ why: 'Anthropic rejected the API key (401): check ANTHROPIC_API_KEY in .env', fix: `c2t step convert --run ${ctx.run}` });
   if (noKey.length) needsHuman.push({ why: `AI pass skipped for ${noKey.length} weak sections: no Anthropic credentials`, fix: `export ANTHROPIC_API_KEY=... && c2t step convert --run ${ctx.run}` });
   if (s.push?.mediaMissing) needsHuman.push({ why: `${s.push.mediaMissing} images did not import` });
   if (s.verify?.brokenImages?.length) needsHuman.push({ why: `${s.verify.brokenImages.length} broken images on the local page` });
