@@ -43,7 +43,7 @@ export async function convert(ctx, dir) {
         continue;
       }
       const html = fs.readFileSync(path.join(exDir, 'sections', `${s.id}.html`), 'utf8');
-      const base = { html, bg: s.bg, bgColor: s.bgColor, role: s.role };
+      const base = { html, bg: s.bg, bgColor: s.bgColor, textColor: s.textColor, linkColor: s.linkColor, role: s.role };
       let out = await page.evaluate(toBlocks, base);
       const plainUnclear = !html || (out.total ? out.unclear / out.total : 1) > 0.5;
       // Plain score: the last verify of a plain conversion, carried over while Haiku's version is live.
@@ -143,7 +143,7 @@ function fidelity(html, markup) {
 }
 
 // Runs in the block editor page.
-function toBlocks({ html, bg, bgColor, role, aiMarkup }) {
+function toBlocks({ html, bg, bgColor, textColor, linkColor, role, aiMarkup }) {
   const { rawHandler, createBlock, serialize, parse, getBlockType } = wp.blocks;
 
   // rawHandler keeps nested wrappers as raw HTML, so flatten to a run of real blocks first.
@@ -219,7 +219,9 @@ function toBlocks({ html, bg, bgColor, role, aiMarkup }) {
         layout: { type: 'constrained' },
         style: {
           spacing: { padding: { top: 'var:preset|spacing|50', bottom: 'var:preset|spacing|50' } },
-          ...(solid(bgColor) ? { color: { background: solid(bgColor) } } : {}),
+          // The original's own text and link colors, so dark sections don't inherit the theme's dark text.
+          ...(solid(bgColor) || solid(textColor) ? { color: { ...(solid(bgColor) ? { background: solid(bgColor) } : {}), ...(solid(textColor) ? { text: solid(textColor) } : {}) } } : {}),
+          ...(solid(linkColor) ? { elements: { link: { color: { text: solid(linkColor) } } } } : {}),
         },
       }, inner);
   return { markup: serialize([block]), total, unclear, counts };

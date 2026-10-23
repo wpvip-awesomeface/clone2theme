@@ -85,6 +85,21 @@ function analyze() {
     return [c];
   });
 
+  // Most-used text and link colors inside a section, weighted by visible characters.
+  const inkColors = (el) => {
+    const text = new Map(), link = new Map();
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+      const n = t.textContent.trim().length;
+      const p = t.parentElement;
+      if (!n || !p || !visible(p)) continue;
+      const m = p.closest('a') ? link : text;
+      m.set(getComputedStyle(p).color, (m.get(getComputedStyle(p).color) || 0) + n);
+    }
+    const best = (m) => [...m.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+    return { textColor: best(text), linkColor: best(link) };
+  };
+
   const sections = candidates.map((el, i) => {
     const id = String(i + 1).padStart(2, '0');
     el.setAttribute('data-c2t-section', id);
@@ -102,6 +117,7 @@ function analyze() {
       heading: (el.querySelector('h1,h2,h3')?.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 80),
       bg: bg && !bg.startsWith('data:') ? new URL(bg, location.href).href : null,
       bgColor: getComputedStyle(el).backgroundColor,
+      ...inkColors(el),
     };
   });
 
