@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import Anthropic from '@anthropic-ai/sdk';
+import { PNG } from 'pngjs';
 import { ROOT, exists, read, write } from './guard.js';
 
 // C2T_MODEL swaps the model (e.g. claude-sonnet-5-5) for comparison runs; the cache is keyed by model.
@@ -41,6 +42,16 @@ const FORMAT = {
   },
 };
 
+// Long sections get downscaled until layout is unreadable, so send the top at full size instead.
+const MAX_SHOT_HEIGHT = 2000;
+function topOf(buf) {
+  const png = PNG.sync.read(buf);
+  if (png.height <= MAX_SHOT_HEIGHT) return buf;
+  const out = new PNG({ width: png.width, height: MAX_SHOT_HEIGHT });
+  png.data.copy(out.data, 0, 0, png.width * MAX_SHOT_HEIGHT * 4);
+  return PNG.sync.write(out);
+}
+
 export function hasCredentials() {
   return !!(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_PROFILE
     || exists(path.join(process.env.HOME || '', '.config', 'anthropic')));
@@ -65,7 +76,8 @@ export const cachePath = (key) => path.join(CACHE_DIR, `${key}.json`);
 
 export async function patternFor({ html, screenshot, palette, lastError, b }) {
   if (html.length > MAX_HTML_CHARS) throw new Error(`section too large for the AI step (${html.length} chars > ${MAX_HTML_CHARS})`);
-  const image = fs.existsSync(screenshot) ? fs.readFileSync(screenshot) : null;
+  const image = fs.existsSync(screenshot) ? topOf(fs.readFileSync(screenshot)) : null;
+  const tall = image && image.length !== fs.statSync(screenshot).size;
   const cacheFile = cachePath(cacheKey({ html, screenshot, palette, lastError }));
   if (exists(cacheFile)) {
     b.state.cached++;
@@ -81,7 +93,8 @@ export async function patternFor({ html, screenshot, palette, lastError, b }) {
   if (image) content.push({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: image.toString('base64') } });
   content.push({
     type: 'text',
-    text: `Palette slugs: ${palette.map((p) => `${p.slug} (${p.color})`).join(', ')}\n\nSection HTML:\n${html}`
+    text: (tall ? `The screenshot shows only the top ${MAX_SHOT_HEIGHT}px of a long section; repeat the layout you see there for every item in the HTML.\n\n` : '')
+      + `Palette slugs: ${palette.map((p) => `${p.slug} (${p.color})`).join(', ')}\n\nSection HTML:\n${html}`
       + (lastError ? `\n\nYour previous answer failed validation: ${lastError}\nFix that and answer again.` : ''),
   });
 

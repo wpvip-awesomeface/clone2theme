@@ -11,7 +11,7 @@ const COARSE_WIDTH = 48;
 const MAX_DIFF_HEIGHT = 2400;
 export const PASS = 0.85;
 export const CLOSE = 0.65;
-export const SCORER = 2; // bump when scoring changes: score-guard decisions from older scorers are re-made
+export const SCORER = 3; // bump when scoring changes: score-guard decisions from older scorers are re-made
 
 export async function verify(ctx, dir) {
   const { siteUrl } = read(path.join(ctx.dir, 'push', 'done.json'));
@@ -127,8 +127,11 @@ export function diff(origFile, localFile, outFile, w = DIFF_WIDTH) {
   const a = trim(PNG.sync.read(fs.readFileSync(origFile)));
   const b = trim(PNG.sync.read(fs.readFileSync(localFile)));
   // Fine pass catches text and detail; coarse pass rewards matching layout even when things shift a little.
-  const fine = match(a, b, w, outFile);
-  const coarse = match(a, b, COARSE_WIDTH);
+  // Long sections are scored in bands that each find their own vertical alignment: one row a bit shorter
+  // near the top used to misalign everything below it and score a correct layout below a flat one.
+  const m = a.height > BAND_MIN ? banded : match;
+  const fine = m(a, b, w, outFile);
+  const coarse = m(a, b, COARSE_WIDTH);
   const pixels = (fine + coarse) / 2;
   // pixelmatch only sees the original's height, so charge for height drift directly,
   // measured on content (trailing empty space doesn't count).
@@ -193,6 +196,50 @@ function match(a, b, w, outFile) {
 }
 
 const SHIFTS = [0, -1, 1, -2, 2];
+const BAND_MIN = 1200; // original px; shorter sections keep the single top-aligned comparison
+const BAND = 400; // original px per band
+const BAND_SEARCH = 0.2; // how far (share of the original's height) a band may drift from the one above
+
+function banded(a, b, w, outFile) {
+  const scale = w / a.width;
+  const h = Math.max(1, Math.min(MAX_DIFF_HEIGHT, Math.round(a.height * scale)));
+  const ra = resize(a, w, h);
+  const hb = Math.max(1, Math.min(MAX_DIFF_HEIGHT * 2, Math.round(b.height * scale)));
+  const rb = resize(b, w, hb);
+  const bh = Math.max(4, Math.round(BAND * scale));
+  const reach = Math.max(2, Math.min(Math.round(h * BAND_SEARCH), bh * 2));
+  const steps = [0]; // every row near the last offset, then coarser
+  for (let d = 1; d <= reach; d += d < 8 ? 1 : 3) steps.push(d);
+  const row = w * 4;
+  const out = outFile ? new PNG({ width: w, height: h }) : null;
+  let offset = 0, bad = 0, ink = 0;
+  for (let y = 0; y < h; y += bh) {
+    const n = Math.min(bh, h - y);
+    const band = new PNG({ width: w, height: n });
+    ra.data.copy(band.data, 0, y * row, (y + n) * row);
+    let best = null;
+    // Search near the previous band's offset, nearest first so ties keep the smaller drift.
+    for (const d of steps) {
+      for (const dy of d ? [offset + d, offset - d] : [offset]) {
+        const sb = new PNG({ width: w, height: n });
+        for (let r = 0; r < n; r++) {
+          const from = Math.min(hb - 1, Math.max(0, y + r + dy));
+          rb.data.copy(sb.data, r * row, from * row, from * row + row);
+        }
+        const diffOut = new PNG({ width: w, height: n });
+        const miss = pixelmatch(band.data, sb.data, diffOut.data, w, n, { threshold: 0.05, alpha: 0.3 });
+        const denom = Math.max(inkPixels(band, sb), w * n * 0.02);
+        if (!best || miss / denom < best.miss / best.denom) best = { dy, miss, denom, diffOut };
+      }
+    }
+    offset = best.dy;
+    bad += best.miss;
+    ink += best.denom;
+    if (out) best.diffOut.data.copy(out.data, y * row);
+  }
+  if (outFile) fs.writeFileSync(outFile, PNG.sync.write(out));
+  return Math.max(0, 1 - bad / ink);
+}
 const EDGE = 2;
 
 function trim(src) {

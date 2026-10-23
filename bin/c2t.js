@@ -31,7 +31,7 @@ const { values: o, positionals: [cmd, arg] } = parseArgs({
   allowPositionals: true,
   options: {
     site: { type: 'string' }, 'ai-budget': { type: 'string' }, run: { type: 'string' }, section: { type: 'string' }, until: { type: 'string' },
-    'no-ai': { type: 'boolean' }, fresh: { type: 'boolean' }, only: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
+    'no-ai': { type: 'boolean' }, 'keep-ai': { type: 'boolean' }, fresh: { type: 'boolean' }, only: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
   },
 });
 
@@ -49,7 +49,7 @@ async function pipeline(ctx, to = STEPS.length - 1) {
     await runSteps(ctx, to);
   }
   // Haiku only stays where it scored higher than the plain conversion.
-  const reverted = !process.exitCode && to === STEPS.length - 1 ? guardAi(ctx.dir) : [];
+  const reverted = !process.exitCode && to === STEPS.length - 1 && !ctx.keepAi ? guardAi(ctx.dir) : [];
   if (reverted.length) {
     log('ai', `kept plain for ${reverted.join(', ')} (AI scored no higher)`);
     ctx.force = new Set(STEPS.slice(STEPS.indexOf('build')));
@@ -97,6 +97,7 @@ try {
     if (i < 0 || !o.run) throw new Error(`usage: c2t step <${STEPS.join('|')}> --run <slug>`);
     const ctx = loadCtx(o.run);
     ctx.section = o.section;
+    ctx.keepAi = !!o['keep-ai']; // skip the score guard, to look at an AI version that lost
     ctx.force = new Set(o.only ? [arg] : STEPS.slice(i));
     await pipeline(ctx, o.only ? i : undefined);
   } else if (cmd === 'open') {

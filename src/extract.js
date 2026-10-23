@@ -86,6 +86,13 @@ const sat = (h) => {
   const v = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
   return (Math.max(...v) - Math.min(...v)) / 255;
 };
+// Content width of one section, symmetric around the center: viewport minus the smaller gutter, twice.
+export function sectionWidth(s, vw = 1440) {
+  if (!s.box) return null;
+  // An image bleeding off one edge doesn't make the section full width: use the other side's gutter.
+  const sides = [s.box.left, vw - s.box.right].filter((g) => g >= 16);
+  return sides.length ? Math.round(vw - 2 * Math.min(...sides)) : null;
+}
 const firstFamily = (f) => (f || '').split(',')[0].replace(/["']/g, '').trim();
 
 export function buildTokens(dom) {
@@ -123,6 +130,9 @@ export function buildTokens(dom) {
   }]));
   const faces = (dom.fontFaces || []).map((f) => ({ ...f, slug: famSlug(f.family) })).filter((f) => f.slug);
   const widths = t.maxWidths.map((w) => parseFloat(w.value)).filter((n) => n >= 900 && n <= 1600);
+  // Measured content width wins over max-width tokens: the median of wide sections' content boxes.
+  const measured = dom.sections.map((s) => sectionWidth(s, dom.viewport || 1440)).filter((n) => n >= 900).sort((a, b) => a - b);
+  if (measured.length) widths.unshift(measured[Math.floor(measured.length / 2)]);
   return {
     palette,
     fonts: [

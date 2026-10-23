@@ -24,7 +24,7 @@ export async function capture(ctx, dir) {
 
     fs.mkdirSync(path.join(dir, 'sections'), { recursive: true });
     for (const s of dom.sections) {
-      const clip = { x: 0, y: s.top, width: VIEWPORT.width, height: Math.max(1, Math.min(s.height, 4000)) };
+      const clip = { x: 0, y: s.top, width: VIEWPORT.width, height: Math.max(1, Math.min(s.height, 16000)) };
       await page.screenshot({ path: path.join(dir, 'sections', `${s.id}.png`), clip, fullPage: true }).catch(() => {});
     }
 
@@ -100,6 +100,26 @@ function analyze() {
     return { textColor: best(text), linkColor: best(link) };
   };
 
+  // Horizontal content box: the blocks holding visible text, plus images narrower than the viewport.
+  // Containers here are often padding-based, so max-width tokens alone miss the real gutters.
+  const contentBox = (el) => {
+    let left = Infinity, right = -Infinity;
+    const add = (n) => {
+      const r = n.getBoundingClientRect();
+      if (r.width < 2 || r.width > innerWidth * 0.95) return;
+      left = Math.min(left, r.left); right = Math.max(right, r.right);
+    };
+    el.querySelectorAll('*').forEach((n) => {
+      if (SKIP.has(n.tagName) || n.closest('svg') || !visible(n)) return;
+      if (n.tagName === 'IMG') return add(n);
+      if (![...n.childNodes].some((c) => c.nodeType === 3 && c.textContent.trim())) return;
+      let blk = n;
+      while (blk.parentElement && blk !== el && getComputedStyle(blk).display.startsWith('inline')) blk = blk.parentElement;
+      add(blk);
+    });
+    return left < right ? { left: Math.round(left), right: Math.round(right) } : null;
+  };
+
   const sections = candidates.map((el, i) => {
     const id = String(i + 1).padStart(2, '0');
     el.setAttribute('data-c2t-section', id);
@@ -117,6 +137,7 @@ function analyze() {
       heading: (el.querySelector('h1,h2,h3')?.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 80),
       bg: bg && !bg.startsWith('data:') ? new URL(bg, location.href).href : null,
       bgColor: getComputedStyle(el).backgroundColor,
+      box: contentBox(el),
       ...inkColors(el),
     };
   });

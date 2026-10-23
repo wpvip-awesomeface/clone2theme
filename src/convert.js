@@ -7,6 +7,7 @@ import { devenv } from './devenv.js';
 import { read, write, exists, withRetry } from './guard.js';
 import { patternFor, budget, MODEL, isAi } from './ai.js';
 import { CLOSE, SCORER } from './verify.js';
+import { sectionWidth } from './extract.js';
 
 export async function convert(ctx, dir) {
   const exDir = path.join(ctx.dir, 'extract');
@@ -45,7 +46,7 @@ export async function convert(ctx, dir) {
       }
       const html = fs.readFileSync(path.join(exDir, 'sections', `${s.id}.html`), 'utf8');
       const shot = path.join(ctx.dir, 'capture', 'sections', `${s.id}.png`);
-      const base = { html, bg: s.bg, height: s.height, pad: !s.bg && exists(shot) ? padding(shot) : null, bgColor: s.bgColor, textColor: s.textColor, linkColor: s.linkColor, role: s.role };
+      const base = { html, bg: s.bg, height: s.height, width: sectionWidth(s), pad: !s.bg && exists(shot) ? padding(shot) : null, bgColor: s.bgColor, textColor: s.textColor, linkColor: s.linkColor, role: s.role };
       let out = await page.evaluate(toBlocks, base);
       const plainUnclear = !html || (out.total ? out.unclear / out.total : 1) > 0.5;
       // Plain score: the last verify of a plain conversion, carried over while Haiku's version is live.
@@ -170,7 +171,7 @@ function fidelity(html, markup) {
 }
 
 // Runs in the block editor page.
-function toBlocks({ html, bg, height, pad, bgColor, textColor, linkColor, role, aiMarkup }) {
+function toBlocks({ html, bg, height, width, pad, bgColor, textColor, linkColor, role, aiMarkup }) {
   const { rawHandler, createBlock, serialize, parse, getBlockType } = wp.blocks;
 
   // rawHandler keeps nested wrappers as raw HTML, so flatten to a run of real blocks first.
@@ -240,11 +241,11 @@ function toBlocks({ html, bg, height, pad, bgColor, textColor, linkColor, role, 
   if (!inner.length) inner = [createBlock('core/paragraph', { content: '' })];
 
   const block = bg
-    ? createBlock('core/cover', { url: bg, dimRatio: 40, align: 'full', minHeight: height ? Math.min(height, 1200) : 420, minHeightUnit: 'px', layout: { type: 'constrained' } }, inner)
+    ? createBlock('core/cover', { url: bg, dimRatio: 40, align: 'full', minHeight: height ? Math.min(height, 1200) : 420, minHeightUnit: 'px', layout: { type: 'constrained', ...(width ? { contentSize: `${width}px` } : {}) } }, inner)
     : createBlock('core/group', {
         tagName: role === 'header' ? 'header' : role === 'footer' ? 'footer' : 'section',
         align: 'full',
-        layout: { type: 'constrained' },
+        layout: { type: 'constrained', ...(width ? { contentSize: `${width}px` } : {}) },
         style: {
           // Never shorter than the original section.
           ...(height ? { dimensions: { minHeight: `${Math.min(height, 1200)}px` } } : {}),
