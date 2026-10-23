@@ -45,8 +45,7 @@ error, then fall back to the plain conversion and land in "needs a human".
 
 - Score guard: after verify, a Haiku rebuild that scores no higher than the plain conversion is swapped back
   (`convert/blocks/<id>.plain.html`) and pinned to plain in `convert/done.json` (`keepPlain`), so reruns skip it.
-  `step convert --section <n>` retries Haiku for a pinned section. The guard trusts the score: it can keep a plain
-  version that looks worse (e.g. unreadable text on a dark background) if Haiku's layout is a different height.
+  `step convert --section <n>` retries Haiku for a pinned section. Pins from an older `SCORER` are ignored.
 - Cache: `cache/ai/<sha256 of model, prompt version, html, palette, screenshot>.json`. A section is never paid for twice, and cache hits work offline.
 - Token cap: `--ai-budget` per run (input + output, tracked in `runs/<slug>/ai-usage.json`). Calls that won't fit are skipped, not truncated.
 - Credentials: `ANTHROPIC_API_KEY` in `.env` next to `package.json` (copy `.env.example`; gitignored), the shell env, or an `ant auth login` profile. Without them the pass is skipped with one report line.
@@ -56,7 +55,12 @@ error, then fall back to the plain conversion and land in "needs a human".
 Both sides are scaled to the original's width (no stretching), top-aligned, and the local side is cut or
 padded to the original's height. pixelmatch (threshold 0.05) runs at 320px (detail) and 48px (layout).
 Score = average share of content pixels that match (flat background ignored) × sqrt of the content-height ratio.
-pass ≥ 85%, close ≥ 65%, otherwise fail. An original compared with itself scores 100%.
+The score is then multiplied by the section's readable share: visible text characters with contrast ≥ 3:1 against
+the nearest solid background (text over cover images counts as readable), so dark-on-dark text scores like missing text.
+A 2px edge is trimmed from both screenshots (sections on fractional pixels pick up a sliver of their neighbor) and the
+fine pass takes the best of ±2 row offsets; same markup now scores within ~1 point across builds.
+pass ≥ 85%, close ≥ 65%, otherwise fail. `SCORER` in `verify.js` versions this; bump it when scoring changes so
+score-guard decisions get re-made. An original compared with itself scores 100%.
 `--no-ai` clones score low on purpose: the layout is linear, so the score is a to-do list, not a grade.
 
 ## Not built yet

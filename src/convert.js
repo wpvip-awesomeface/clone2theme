@@ -5,7 +5,7 @@ import { launch } from './browser.js';
 import { devenv } from './devenv.js';
 import { read, write, exists, withRetry } from './guard.js';
 import { patternFor, budget, MODEL } from './ai.js';
-import { CLOSE } from './verify.js';
+import { CLOSE, SCORER } from './verify.js';
 
 export async function convert(ctx, dir) {
   const exDir = path.join(ctx.dir, 'extract');
@@ -49,10 +49,10 @@ export async function convert(ctx, dir) {
       // Plain score: the last verify of a plain conversion, carried over while Haiku's version is live.
       const p = prevBy[s.id];
       const plainScore = (p && !p.ai?.startsWith(MODEL) ? lastScore[s.id] : p?.plainScore) ?? null;
-      const keepPlain = p?.keepPlain || null;
+      const keepPlain = p?.keepPlain?.scorer === SCORER ? p.keepPlain : null;
       let ai = ctx.noAi ? 'skipped (--no-ai)' : 'not needed';
       if (aiStop) ai = aiStop;
-      else if (keepPlain && only !== s.id) ai = `kept plain (Haiku ${pct(keepPlain.haiku)} vs plain ${pct(keepPlain.plain)})`;
+      else if (keepPlain && only !== s.id && aiOn) ai = `kept plain (Haiku ${pct(keepPlain.haiku)} vs plain ${pct(keepPlain.plain)})`;
       else if (aiOn && html && (plainUnclear || weak.has(s.id) || only === s.id)) {
         const got = await withRetry(`ai:${s.id}`, async (lastErr) => {
           const r = await patternFor({ html, screenshot: path.join(ctx.dir, 'capture', 'sections', `${s.id}.png`), palette, lastError: lastErr?.message, b });
@@ -118,7 +118,7 @@ export function guardAi(runDir) {
     const plainFile = path.join(runDir, 'convert', 'blocks', `${s.id}.plain.html`);
     if (!s.ai?.startsWith(MODEL) || s.plainScore == null || haiku == null || haiku > s.plainScore || !exists(plainFile)) continue;
     fs.copyFileSync(plainFile, path.join(runDir, 'convert', 'blocks', `${s.id}.html`));
-    s.keepPlain = { haiku, plain: s.plainScore };
+    s.keepPlain = { haiku, plain: s.plainScore, scorer: SCORER };
     s.ai = `kept plain (Haiku ${pct(haiku)} vs plain ${pct(s.plainScore)})`;
     reverted.push(s.id);
   }

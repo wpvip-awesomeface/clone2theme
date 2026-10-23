@@ -11,12 +11,13 @@ const COARSE_WIDTH = 48;
 const MAX_DIFF_HEIGHT = 2400;
 export const PASS = 0.85;
 export const CLOSE = 0.65;
+export const SCORER = 2; // bump when scoring changes: score-guard decisions from older scorers are re-made
 
 export async function verify(ctx, dir) {
   const { siteUrl } = read(path.join(ctx.dir, 'push', 'done.json'));
   const conv = read(path.join(ctx.dir, 'convert', 'done.json'));
   const browser = await launch({ local: true });
-  let status, height, broken, found;
+  let status, height, broken, found, readable;
   fs.mkdirSync(path.join(dir, 'sections'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'diff'), { recursive: true });
   try {
@@ -48,6 +49,7 @@ export async function verify(ctx, dir) {
       }
       return hit;
     }, ids);
+    readable = await page.evaluate(readability);
     for (const id of found) {
       await page.locator(`[data-c2t-local="${id}"]`).screenshot({ path: path.join(dir, 'sections', `${id}.png`) }).catch(() => {});
     }
@@ -60,7 +62,11 @@ export async function verify(ctx, dir) {
     const orig = path.join(capDir, 'sections', `${s.id}.png`);
     const local = path.join(dir, 'sections', `${s.id}.png`);
     if (!fs.existsSync(orig) || !fs.existsSync(local)) return { id: s.id, score: null, status: 'missing' };
-    return { id: s.id, ...diff(orig, local, path.join(dir, 'diff', `${s.id}.png`)) };
+    const d = diff(orig, local, path.join(dir, 'diff', `${s.id}.png`));
+    // Text the visitor can't read counts as missing: scale by the share of readable characters.
+    const r = readable[s.id] ?? 1;
+    const score = round(d.score * r);
+    return { id: s.id, ...d, score, status: grade(score), readable: r };
   });
   const page = diff(path.join(capDir, 'full.png'), path.join(dir, 'full.png'), path.join(dir, 'diff', 'full.png'));
   const scored = sections.filter((s) => s.score !== null);
@@ -77,10 +83,49 @@ export async function verify(ctx, dir) {
 }
 
 const round = (n) => Math.round(n * 1000) / 1000;
+const grade = (score) => (score >= PASS ? 'pass' : score >= CLOSE ? 'close' : 'fail');
+
+// Runs in the local page: per marked section, share of visible text characters with contrast >= 3:1
+// against the nearest solid background. Text over images (cover blocks) is given the benefit of the doubt.
+function readability() {
+  const rgba = (c) => (c.match(/[\d.]+/g) || []).map(Number);
+  const lum = ([r, g, b]) => [r, g, b].map((v) => v / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4))
+    .reduce((a, v, i) => a + v * [0.2126, 0.7152, 0.0722][i], 0);
+  const blend = (fg, bg) => [0, 1, 2].map((i) => fg[i] * (fg[3] ?? 1) + bg[i] * (1 - (fg[3] ?? 1)));
+  const backdrop = (el) => {
+    for (let n = el; n; n = n.parentElement) {
+      if (n.classList?.contains('wp-block-cover')) return null;
+      const c = rgba(getComputedStyle(n).backgroundColor);
+      if (c.length && (c[3] ?? 1) >= 0.5) return c;
+    }
+    return [255, 255, 255];
+  };
+  const out = {};
+  document.querySelectorAll('[data-c2t-local]').forEach((sec) => {
+    let ok = 0, all = 0;
+    const walker = document.createTreeWalker(sec, NodeFilter.SHOW_TEXT);
+    for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+      const n = t.textContent.trim().length;
+      const el = t.parentElement;
+      if (!n || !el || !el.getClientRects().length) continue;
+      const cs = getComputedStyle(el);
+      if (cs.visibility === 'hidden') continue;
+      all += n;
+      const bg = backdrop(el);
+      if (!bg) { ok += n; continue; }
+      const fg = blend(rgba(cs.color), bg);
+      const [hi, lo] = [lum(fg), lum(bg)].sort((a, b) => b - a);
+      if ((hi + 0.05) / (lo + 0.05) >= 3) ok += n;
+    }
+    out[sec.getAttribute('data-c2t-local')] = all >= 20 ? Math.round((ok / all) * 1000) / 1000 : 1;
+  });
+  return out;
+}
 
 export function diff(origFile, localFile, outFile, w = DIFF_WIDTH) {
-  const a = PNG.sync.read(fs.readFileSync(origFile));
-  const b = PNG.sync.read(fs.readFileSync(localFile));
+  // Sections rarely sit on whole pixels, so element screenshots pick up a sliver of the neighbor at an edge. On dark sections that row alone moved scores ~10 points, so trim it from both sides.
+  const a = trim(PNG.sync.read(fs.readFileSync(origFile)));
+  const b = trim(PNG.sync.read(fs.readFileSync(localFile)));
   // Fine pass catches text and detail; coarse pass rewards matching layout even when things shift a little.
   const fine = match(a, b, w, outFile);
   const coarse = match(a, b, COARSE_WIDTH);
@@ -91,7 +136,7 @@ export function diff(origFile, localFile, outFile, w = DIFF_WIDTH) {
   const score = round(pixels * Math.sqrt(Math.min(ratio, 1 / ratio) || 0));
   return {
     score,
-    status: score >= PASS ? 'pass' : score >= CLOSE ? 'close' : 'fail',
+    status: grade(score),
     pixels: round(pixels),
     heightRatio: round(ratio),
   };
@@ -132,12 +177,44 @@ function match(a, b, w, outFile) {
   // Same scale as the original, top-aligned; cut or padded with its own bottom color to the original's height.
   const hb = Math.max(1, Math.round((b.height * w) / b.width));
   const rb = fit(resize(b, w, Math.min(hb, MAX_DIFF_HEIGHT * 2)), h);
-  const out = new PNG({ width: w, height: h });
-  const bad = pixelmatch(ra.data, rb.data, out.data, w, h, { threshold: 0.05, alpha: 0.3 });
-  if (outFile) fs.writeFileSync(outFile, PNG.sync.write(out));
-  // Flat backgrounds would inflate a plain pixel ratio, so only count "ink":
-  // pixels that differ from the original's dominant color in either image.
-  return Math.max(0, 1 - bad / Math.max(inkPixels(ra, rb), (w * h) * 0.02));
+  // Sub-pixel layout drift above a section shifts it by a pixel or two and used to swing scores ~10 points,
+  // so try small vertical offsets and keep the best. Flat backgrounds would inflate a plain pixel ratio,
+  // so only count "ink": pixels that differ from the original's dominant color in either image.
+  let best = -1, bestOut = null;
+  for (const dy of w >= DIFF_WIDTH ? SHIFTS : [0]) { // the coarse pass is already shift tolerant
+    const sb = shift(rb, dy);
+    const out = new PNG({ width: w, height: h });
+    const bad = pixelmatch(ra.data, sb.data, out.data, w, h, { threshold: 0.05, alpha: 0.3 });
+    const m = Math.max(0, 1 - bad / Math.max(inkPixels(ra, sb), (w * h) * 0.02));
+    if (m > best) { best = m; bestOut = out; }
+  }
+  if (outFile) fs.writeFileSync(outFile, PNG.sync.write(bestOut));
+  return best;
+}
+
+const SHIFTS = [0, -1, 1, -2, 2];
+const EDGE = 2;
+
+function trim(src) {
+  if (src.height <= EDGE * 4 || src.width <= EDGE * 4) return src;
+  const dst = new PNG({ width: src.width - EDGE * 2, height: src.height - EDGE * 2 });
+  for (let y = 0; y < dst.height; y++) {
+    const from = ((y + EDGE) * src.width + EDGE) * 4;
+    src.data.copy(dst.data, y * dst.width * 4, from, from + dst.width * 4);
+  }
+  return dst;
+}
+
+// Move an image up (dy < 0) or down by whole rows, repeating the edge row.
+function shift(src, dy) {
+  if (!dy) return src;
+  const dst = new PNG({ width: src.width, height: src.height });
+  const row = src.width * 4;
+  for (let y = 0; y < src.height; y++) {
+    const from = Math.min(src.height - 1, Math.max(0, y - dy));
+    src.data.copy(dst.data, y * row, from * row, from * row + row);
+  }
+  return dst;
 }
 
 function fit(src, h) {
