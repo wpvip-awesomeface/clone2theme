@@ -110,6 +110,18 @@ export function buildTokens(dom) {
   const bodyFont = t.fonts[0]?.value || 'system-ui, sans-serif';
   const headingFont = t.headingFonts[0]?.value || bodyFont;
   const sizes = [...new Set(t.fontSizes.map((s) => parseFloat(s.value)).filter((n) => n >= 12 && n <= 96))].sort((a, b) => a - b);
+  // Heading styles per level; families map to the body/heading presets when they match.
+  const famSlug = (f) => (firstFamily(f) === firstFamily(headingFont) ? 'heading' : firstFamily(f) === firstFamily(bodyFont) ? 'body' : null);
+  const headings = Object.fromEntries(Object.entries(dom.headings || {}).map(([tag, h]) => [tag, {
+    fontSize: h.fontSize,
+    fontFamily: famSlug(h.fontFamily),
+    fontWeight: h.fontWeight,
+    fontStyle: h.fontStyle === 'normal' ? undefined : h.fontStyle,
+    lineHeight: h.lineHeight === 'normal' ? undefined : (parseFloat(h.lineHeight) / parseFloat(h.fontSize)).toFixed(2),
+    letterSpacing: h.letterSpacing === 'normal' ? undefined : h.letterSpacing,
+    textTransform: h.textTransform === 'none' ? undefined : h.textTransform,
+  }]));
+  const faces = (dom.fontFaces || []).map((f) => ({ ...f, slug: famSlug(f.family) })).filter((f) => f.slug);
   const widths = t.maxWidths.map((w) => parseFloat(w.value)).filter((n) => n >= 900 && n <= 1600);
   return {
     palette,
@@ -118,6 +130,8 @@ export function buildTokens(dom) {
       ...(firstFamily(headingFont) !== firstFamily(bodyFont) ? [{ slug: 'heading', name: firstFamily(headingFont), fontFamily: headingFont }] : []),
     ],
     fontSizes: sizes.slice(0, 6).map((n, i) => ({ slug: ['small', 'medium', 'large', 'x-large', 'xx-large', 'huge'][i], name: `${n}px`, size: `${n}px` })),
+    headings,
+    fontFaces: faces,
     bodySize: t.fontSizes[0]?.value || '16px',
     contentSize: `${widths[0] || 1200}px`,
     darkBase: lum(base) < 0.2,

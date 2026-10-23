@@ -30,7 +30,8 @@ export async function capture(ctx, dir) {
 
     write(path.join(dir, 'raw.html'), await page.content());
     const assets = await downloadAssets(context, dom.assetUrls, path.join(dir, 'assets'));
-    write(path.join(dir, 'dom.json'), { ...dom, assets });
+    const faces = await fontFaces(context, dom, path.join(dir, 'assets', 'fonts'));
+    write(path.join(dir, 'dom.json'), { ...dom, assets, fontFaces: faces });
 
     return {
       url: ctx.url,
@@ -38,6 +39,7 @@ export async function capture(ctx, dir) {
       title: dom.title,
       sections: dom.sections.length,
       assets: Object.keys(assets).length,
+      fonts: faces.length,
       height: dom.pageHeight,
     };
   } finally {
@@ -146,6 +148,34 @@ function analyze() {
     if ((el.tagName === 'BUTTON' || el.tagName === 'A') && own && !/rgba\(0, 0, 0, 0\)/.test(cs.backgroundColor)) tally(buttons, cs.backgroundColor, 1);
     if (cs.maxWidth.endsWith('px')) tally(widths, cs.maxWidth, 1);
   }
+  // Per heading level: the style of the instance carrying the most text (a level can be restyled per section).
+  const headings = {};
+  for (const tag of ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']) {
+    const best = [...document.querySelectorAll(tag)].filter((h) => !h.closest('svg') && visible(h))
+      .sort((a, b) => b.textContent.trim().length - a.textContent.trim().length)[0];
+    if (!best) continue;
+    const cs = getComputedStyle(best);
+    headings[tag] = {
+      fontSize: cs.fontSize, fontFamily: cs.fontFamily, fontWeight: cs.fontWeight, fontStyle: cs.fontStyle,
+      lineHeight: cs.lineHeight, letterSpacing: cs.letterSpacing, textTransform: cs.textTransform,
+    };
+  }
+
+  // @font-face rules the browser can read; cross-origin sheets throw and are fetched in Node instead.
+  const faceRules = [], blockedSheets = [];
+  const walk = (rules, base) => {
+    for (const r of rules) {
+      if (r instanceof CSSFontFaceRule) faceRules.push({ css: r.cssText, base });
+      else if (r.cssRules) walk(r.cssRules, base);
+      if (r instanceof CSSImportRule && r.styleSheet) {
+        try { walk(r.styleSheet.cssRules, r.styleSheet.href || base); } catch { blockedSheets.push(r.styleSheet.href); }
+      }
+    }
+  };
+  for (const sheet of document.styleSheets) {
+    try { walk(sheet.cssRules, sheet.href || location.href); } catch { if (sheet.href) blockedSheets.push(sheet.href); }
+  }
+
   const top = (m, n) => [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, w]) => ({ value: k, weight: Math.round(w) }));
 
   return {
@@ -154,6 +184,9 @@ function analyze() {
     pageHeight: document.documentElement.scrollHeight,
     bodyBg: getComputedStyle(document.body).backgroundColor,
     sections,
+    headings,
+    faceRules,
+    blockedSheets,
     assetUrls: [...assetUrls],
     tokens: {
       text: top(text, 6),
@@ -185,4 +218,40 @@ async function downloadAssets(context, urls, dir) {
     } catch { /* skip unreachable assets */ }
   }
   return map;
+}
+
+// Download woff2/woff files for the families the page actually uses, so the theme can self-host them.
+const MAX_FONTS = 16;
+async function fontFaces(context, dom, dir) {
+  const used = new Set([...dom.tokens.fonts, ...dom.tokens.headingFonts, ...Object.values(dom.headings).map((h) => ({ value: h.fontFamily }))]
+    .map((f) => f.value.split(',')[0].replace(/["']/g, '').trim().toLowerCase()));
+  const rules = [...dom.faceRules];
+  for (const href of dom.blockedSheets) {
+    const css = await context.request.get(href, { timeout: 20000 }).then((r) => (r.ok() ? r.text() : '')).catch(() => '');
+    for (const m of css.matchAll(/@font-face\s*\{[^}]*\}/g)) rules.push({ css: m[0], base: href });
+  }
+  const prop = (css, name) => css.match(new RegExp(`${name}\\s*:\\s*([^;}]+)`))?.[1].trim();
+  const faces = [];
+  fs.mkdirSync(dir, { recursive: true });
+  for (const { css, base } of rules) {
+    const family = (prop(css, 'font-family') || '').replace(/["']/g, '').trim();
+    if (!used.has(family.toLowerCase()) || faces.length >= MAX_FONTS) continue;
+    const srcs = [...(prop(css, 'src') || '').matchAll(/url\(["']?([^"')]+)["']?\)/g)].map((m) => m[1]);
+    const src = srcs.find((u) => /\.woff2(\?|#|$)/.test(u)) || srcs.find((u) => /\.woff(\?|#|$)/.test(u));
+    if (!src) continue;
+    const url = new URL(src, base).href;
+    const ext = /\.woff2(\?|#|$)/.test(src) ? '.woff2' : '.woff';
+    const weight = prop(css, 'font-weight') || '400';
+    const style = prop(css, 'font-style') || 'normal';
+    try {
+      const res = await context.request.get(url, { timeout: 20000 });
+      if (!res.ok()) continue;
+      const body = await res.body();
+      if (body.length > 2 * 1024 * 1024) continue;
+      const file = crypto.createHash('sha1').update(url).digest('hex').slice(0, 12) + ext;
+      fs.writeFileSync(path.join(dir, file), body);
+      faces.push({ family, weight, style, file, url });
+    } catch { /* skip unreachable fonts */ }
+  }
+  return faces;
 }

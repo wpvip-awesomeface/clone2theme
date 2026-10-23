@@ -50,6 +50,13 @@ export function devenv(site) {
     return url;
   };
 
+  // Multisite only accepts upload_filetypes; modern captures are mostly webp/avif.
+  const allowImageTypes = (url) => {
+    const types = wp(['site', 'option', 'get', 'upload_filetypes'], { url, allowFail: true }).split(/\s+/).filter(Boolean);
+    const missing = ['webp', 'avif'].filter((t) => !types.includes(t));
+    if (types.length && missing.length) wp(['site', 'option', 'update', 'upload_filetypes', [...types, ...missing].join(' ')], { url });
+  };
+
   const loginKey = () => {
     const out = execFileSync('vip', ['dev-env', 'info', `--slug=${site}`], { input: '', encoding: 'utf8' });
     return out.match(/vip-dev-autologin=([\w-]+)/)?.[1] || null;
@@ -60,6 +67,7 @@ export function devenv(site) {
     host,
     wp,
     ensureSite,
+    allowImageTypes,
     loginKey,
     themesDir: path.join(info.appCode.dir, 'themes'),
     containerThemes: '/wp/wp-content/themes',

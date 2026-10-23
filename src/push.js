@@ -23,15 +23,22 @@ export async function push(ctx, dir) {
   fs.mkdirSync(stage, { recursive: true });
 
   // Media: import once per run and keep the original -> local URL map.
-  let media = prev.siteUrl === url && prev.media ? prev.media : {};
+  // A saved entry only counts if the upload carries its own file name (older runs matched by position).
+  const stem = (file) => file.replace(/\.\w+$/, '');
+  const media = Object.fromEntries(Object.entries(prev.siteUrl === url && prev.media ? prev.media : {})
+    .filter(([orig, local]) => dom.assets[orig] && path.basename(local).startsWith(stem(dom.assets[orig]))));
   const todo = Object.entries(dom.assets).filter(([orig]) => !media[orig]);
   if (todo.length) {
+    env.allowImageTypes(url);
     for (const [, file] of todo) fs.copyFileSync(path.join(ctx.dir, 'capture', 'assets', file), path.join(stage, file));
-    const out = env.wp(['media', 'import', ...todo.map(([, f]) => `${inContainer}/.c2t/${f}`), '--porcelain=url'], { url, allowFail: true });
+    // A refused file (type not allowed) must not stop the run: unmatched images stay hotlinked.
+    let out = '';
+    try { out = env.wp(['media', 'import', ...todo.map(([, f]) => `${inContainer}/.c2t/${f}`), '--porcelain=url'], { url, allowFail: true }); }
+    catch { /* nothing imported */ }
     const urls = out.split('\n').map((l) => l.trim()).filter((l) => /^https?:\/\//.test(l));
     // Match by file name: a failed import would shift positions in the output.
     for (const [orig, file] of todo) {
-      const hit = urls.find((u) => path.basename(u).startsWith(file.replace(/\.\w+$/, '')));
+      const hit = urls.find((u) => path.basename(u).startsWith(stem(file)));
       if (hit) media[orig] = hit;
     }
   }

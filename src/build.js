@@ -17,6 +17,12 @@ export async function build(ctx, dir) {
   const css = fs.readFileSync(path.join(themeDir, 'style.css'), 'utf8')
     .replace('{{name}}', name).replace('{{url}}', ctx.url).replace('{{slug}}', themeSlug);
   write(path.join(themeDir, 'style.css'), css);
+  // Self-host the original web fonts (copied from the live site: local preview only, check the license before shipping).
+  const fonts = tokens.fontFaces || [];
+  for (const f of fonts) {
+    fs.mkdirSync(path.join(themeDir, 'assets', 'fonts'), { recursive: true });
+    fs.copyFileSync(path.join(ctx.dir, 'capture', 'assets', 'fonts', f.file), path.join(themeDir, 'assets', 'fonts', f.file));
+  }
   write(path.join(themeDir, 'theme.json'), themeJson(tokens));
 
   const blocksOf = (id) => fs.readFileSync(path.join(ctx.dir, 'convert', 'blocks', `${id}.html`), 'utf8');
@@ -27,7 +33,7 @@ export async function build(ctx, dir) {
   if (footer.length) write(path.join(themeDir, 'parts', 'footer.html'), footer.join('\n\n'));
   write(path.join(dir, 'front.html'), byRole('body').join('\n\n'));
 
-  return { themeSlug, themeDir, header: header.length, footer: footer.length, body: conv.sections.length - header.length - footer.length };
+  return { themeSlug, themeDir, fonts: fonts.length, header: header.length, footer: footer.length, body: conv.sections.length - header.length - footer.length };
 }
 
 function themeJson(t) {
@@ -42,7 +48,13 @@ function themeJson(t) {
       layout: { contentSize: t.contentSize, wideSize: `${Math.round(parseFloat(t.contentSize) * 1.2)}px` },
       color: { palette: t.palette, defaultPalette: false },
       typography: {
-        fontFamilies: t.fonts,
+        fontFamilies: t.fonts.map((f) => {
+          const faces = (t.fontFaces || []).filter((x) => x.slug === f.slug);
+          return faces.length ? {
+            ...f,
+            fontFace: faces.map((x) => ({ fontFamily: x.family, fontWeight: x.weight, fontStyle: x.style, fontDisplay: 'swap', src: [`file:./assets/fonts/${x.file}`] })),
+          } : f;
+        }),
         fontSizes: t.fontSizes.length ? t.fontSizes : undefined,
         defaultFontSizes: !t.fontSizes.length,
       },
@@ -53,6 +65,7 @@ function themeJson(t) {
       typography: { fontFamily: 'var:preset|font-family|body', fontSize: t.bodySize, lineHeight: '1.6' },
       elements: {
         heading: { typography: { fontFamily: heading, lineHeight: '1.2' } },
+        ...headingLevels(t.headings || {}),
         link: { color: { text: color('primary') || color('contrast') } },
         button: { color: { background: color('primary') || color('contrast'), text: color('base') } },
       },
@@ -62,4 +75,20 @@ function themeJson(t) {
       { name: 'footer', title: 'Footer', area: 'footer' },
     ],
   };
+}
+
+// h1-h6 sizes and styles measured on the original, one element entry per level.
+function headingLevels(levels) {
+  const clean = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== null));
+  return Object.fromEntries(Object.entries(levels).map(([tag, h]) => [tag, {
+    typography: clean({
+      fontSize: h.fontSize,
+      fontFamily: h.fontFamily ? `var:preset|font-family|${h.fontFamily}` : undefined,
+      fontWeight: h.fontWeight,
+      fontStyle: h.fontStyle,
+      lineHeight: h.lineHeight,
+      letterSpacing: h.letterSpacing,
+      textTransform: h.textTransform,
+    }),
+  }]));
 }
