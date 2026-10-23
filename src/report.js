@@ -33,8 +33,10 @@ export function report(ctx) {
     steps: Object.fromEntries(STEPS.map((n) => [n, s[n] ? 'done' : 'pending'])),
     local: s.push?.siteUrl || null,
     theme: s.push?.themePath || s.build?.themeDir || null,
-    sections: sections.map((x) => ({ id: x.id, role: x.role, heading: x.heading, blocks: conv[x.id]?.blocks ?? null, unclear: conv[x.id]?.unclear ?? null, score: scores[x.id]?.score ?? null, match: scores[x.id]?.status ?? null })),
+    sections: sections.map((x) => ({ id: x.id, role: x.role, heading: x.heading, blocks: conv[x.id]?.blocks ?? null, unclear: conv[x.id]?.unclear ?? null, score: scores[x.id]?.score ?? null, match: scores[x.id]?.status ?? null,
+      elements: scores[x.id]?.dom ?? null, pixels: scores[x.id]?.pixelScore ?? null, gaps: scores[x.id]?.gaps || null, worst: scores[x.id]?.worst || [] })),
     scores: s.verify ? { page: s.verify.pageScore, avg: s.verify.avgScore, passing: s.verify.passing, of: s.verify.sections.length } : null,
+    gaps: gapTotals(s.verify?.sections || []),
     ai: s.convert?.ai ? { used: s.convert.ai.used, calls: s.convert.ai.calls, cached: s.convert.ai.cached, tokens: s.convert.ai.spent, cap: s.convert.ai.cap } : null,
     needsHuman,
   };
@@ -43,7 +45,25 @@ export function report(ctx) {
   return data;
 }
 
+// Where the element points go across the page: each section's gap shares averaged, largest first.
+function gapTotals(list) {
+  const withGaps = list.filter((v) => v.gaps);
+  const sum = {};
+  for (const v of withGaps) for (const [k, n] of Object.entries(v.gaps)) sum[k] = (sum[k] || 0) + n / withGaps.length;
+  return Object.fromEntries(Object.entries(sum).sort((a, b) => b[1] - a[1]).map(([k, n]) => [k, Math.round(n * 1000) / 1000]));
+}
+
 const e = (v) => String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+
+const GAP_COLORS = { missing: '#b3261e', position: '#c77700', size: '#8a6d00', 'font-size': '#2b6cb0', weight: '#5a4fcf', font: '#7a3e9d', color: '#1f7a4d', case: '#6b6b66' };
+// One bar: how the points a section lost split between gap kinds.
+function gapBar(gaps) {
+  const total = Object.values(gaps).reduce((a, n) => a + n, 0);
+  if (!total) return '';
+  const parts = Object.entries(gaps).sort((a, b) => b[1] - a[1]);
+  return `<div class="gapbar" title="where the element points went">${parts.map(([k, n]) => `<i style="flex:${n};background:${GAP_COLORS[k] || '#999'}"></i>`).join('')}</div>
+    <p class="meta">${parts.map(([k, n]) => `<span class="key" style="--c:${GAP_COLORS[k] || '#999'}">${e(k)} ${Math.round(n * 100)}</span>`).join(' ')}</p>`;
+}
 
 function html(d, s, sections, conv, scores) {
   const pct = (n) => (n == null ? '–' : `${Math.round(n * 100)}%`);
@@ -59,7 +79,9 @@ function html(d, s, sections, conv, scores) {
     const badge = !c ? '<span class="badge wait">not converted</span>' : c.unclear ? '<span class="badge bad">needs review</span>' : '<span class="badge good">converted</span>';
     const counts = c ? Object.entries(c.counts).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${e(k.replace('core/', ''))} ${v}`).join(' · ') : '';
     return `<article class="card"><header><h3>${e(x.id)} · ${e(x.role)}${x.heading ? ` · ${e(x.heading)}` : ''}</h3>${badge}</header>
-      ${v ? `<p class="score ${v.status}"><b>${pct(v.score)}</b> match · ${e(v.status)}${v.heightRatio ? ` · height ×${v.heightRatio}` : ''}</p>` : ''}
+      ${v ? `<p class="score ${v.status}"><b>${pct(v.score)}</b> match · ${e(v.status)}${v.dom != null ? ` · elements ${pct(v.dom)} (${e(v.matched)} found) · pixels ${pct(v.pixelScore)}` : ''}${v.heightRatio ? ` · height ×${v.heightRatio}` : ''}</p>` : ''}
+      ${v?.gaps ? gapBar(v.gaps) : ''}
+      ${v?.worst?.length ? `<ul class="worst">${v.worst.map((w) => `<li>${e(w)}</li>`).join('')}</ul>` : ''}
       <div class="trio"><figure><figcaption>original</figcaption><img loading="lazy" src="capture/sections/${e(x.id)}.png" alt="original section ${e(x.id)}"></figure>
       ${v && v.score != null ? `<figure><figcaption>local</figcaption><img loading="lazy" src="verify/sections/${e(x.id)}.png" alt="local section ${e(x.id)}"></figure><figure><figcaption>diff</figcaption><img loading="lazy" src="verify/diff/${e(x.id)}.png" alt="pixel diff ${e(x.id)}"></figure>` : ''}</div>
       <p class="meta">${x.words} words · ${x.images} images · ${x.links} links${c ? ` · ${c.blocks} blocks` : ''}</p>
@@ -82,6 +104,9 @@ a{color:inherit}.meta{color:var(--mute);font-size:13px;margin:6px 0}code{font-si
 .compare{display:grid;grid-template-columns:1fr 1fr;gap:16px}.compare figure{margin:0;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px;max-height:900px;overflow:auto}
 .compare img,.card img{width:100%;height:auto;display:block;border-radius:6px}figcaption{font-size:13px;color:var(--mute);margin-bottom:8px}
 .trio{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;align-items:start}.trio figure{margin:0;max-height:420px;overflow:hidden}.trio figcaption{font-size:11px;margin-bottom:4px}
+.gapbar{display:flex;height:10px;border-radius:5px;overflow:hidden;margin:6px 0;background:var(--line)}.gapbar i{display:block}
+.key::before{content:"";display:inline-block;width:9px;height:9px;border-radius:2px;background:var(--c);margin-right:4px}
+.worst{margin:6px 0;padding-left:18px;font-size:12px;color:var(--mute)}.worst li{margin:2px 0}
 .score{margin:0 0 8px;font-size:13px}.score.pass{color:var(--good)}.score.close{color:var(--wait)}.score.fail{color:var(--bad)}
 .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:16px}.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px}
 .card header{display:flex;justify-content:space-between;gap:8px;align-items:start;margin-bottom:8px}.card h3{font-size:14px;margin:0}
@@ -94,7 +119,8 @@ a{color:inherit}.meta{color:var(--mute);font-size:13px;margin:6px 0}code{font-si
 <h2>design tokens</h2><div class="swatches">${palette.map((p) => `<span class="sw"><i style="background:${e(p.color)}"></i>${e(p.slug)} ${e(p.color)}</span>`).join('')}</div>
 <p class="meta">fonts: ${fonts.map((f) => `${e(f.slug)} = ${e(f.name)}`).join(' · ')} · content width ${e(s.extract?.tokens?.contentSize)}</p>
 ${d.ai ? `<p class="meta">ai: ${d.ai.used.length ? `Haiku rebuilt ${d.ai.used.join(', ')}` : 'no sections rebuilt'} · ${d.ai.calls} calls, ${d.ai.cached} cached · ${d.ai.tokens.toLocaleString()} of ${d.ai.cap.toLocaleString()} tokens</p>` : ''}
-${d.scores ? `<h2>match scores</h2><p class="meta">whole page ${pct(d.scores.page)} · section average ${pct(d.scores.avg)} · ${d.scores.passing} of ${d.scores.of} sections pass (≥85%). scores compare pixels after scaling both sides to the original's shape, so layout and height drift both count.</p>` : ''}
+${d.scores ? `<h2>match scores</h2><p class="meta">whole page ${pct(d.scores.page)} · section average ${pct(d.scores.avg)} · ${d.scores.passing} of ${d.scores.of} sections pass (≥85%). a section score is 60% elements (every text block and image found, in place, in the right style) and 40% pixels (backgrounds, borders, icons).</p>` : ''}
+${d.gaps && Object.keys(d.gaps).length ? `<h2>where the points go</h2>${gapBar(d.gaps)}<p class="meta">points lost per gap kind, averaged over sections. missing = not found in the clone; position = offset from where it sits next to its neighbor; size = box or image size; the rest are text styles.</p>` : ''}
 <h2>original vs local</h2><div class="compare"><figure><figcaption>original</figcaption>${s.capture ? '<img loading="lazy" src="capture/full.png" alt="original page">' : ''}</figure><figure><figcaption>local clone</figcaption>${local}</figure></div>
 <h2>sections</h2><div class="cards">${cards}</div>
 </main></body></html>`;

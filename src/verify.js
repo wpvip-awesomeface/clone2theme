@@ -4,20 +4,22 @@ import path from 'node:path';
 import { PNG } from 'pngjs';
 import pixelmatch from 'pixelmatch';
 import { launch } from './browser.js';
-import { read } from './guard.js';
+import { read, write } from './guard.js';
+import { collectElements, compareSection } from './elements.js';
 
 const DIFF_WIDTH = 320; // both sides are scaled to this width before diffing
 const COARSE_WIDTH = 48;
 const MAX_DIFF_HEIGHT = 2400;
+const DOM_WEIGHT = 0.6; // share of a section score from the element match; the rest is pixels
 export const PASS = 0.85;
 export const CLOSE = 0.65;
-export const SCORER = 3; // bump when scoring changes: score-guard decisions from older scorers are re-made
+export const SCORER = 4; // bump when scoring changes: score-guard decisions from older scorers are re-made
 
 export async function verify(ctx, dir) {
   const { siteUrl } = read(path.join(ctx.dir, 'push', 'done.json'));
   const conv = read(path.join(ctx.dir, 'convert', 'done.json'));
   const browser = await launch({ local: true });
-  let status, height, broken, found, readable;
+  let status, height, broken, found, readable, localEls;
   fs.mkdirSync(path.join(dir, 'sections'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'diff'), { recursive: true });
   try {
@@ -50,6 +52,7 @@ export async function verify(ctx, dir) {
       return hit;
     }, ids);
     readable = await page.evaluate(readability);
+    localEls = await page.evaluate(collectElements, 'data-c2t-local');
     for (const id of found) {
       await page.locator(`[data-c2t-local="${id}"]`).screenshot({ path: path.join(dir, 'sections', `${id}.png`) }).catch(() => {});
     }
@@ -58,16 +61,25 @@ export async function verify(ctx, dir) {
   }
 
   const capDir = path.join(ctx.dir, 'capture');
+  const origEls = read(path.join(capDir, 'dom.json')).elements || {};
+  const media = read(path.join(ctx.dir, 'push', 'state.json')).media || {};
+  const gaps = {};
   const sections = conv.sections.map((s) => {
     const orig = path.join(capDir, 'sections', `${s.id}.png`);
     const local = path.join(dir, 'sections', `${s.id}.png`);
     if (!fs.existsSync(orig) || !fs.existsSync(local)) return { id: s.id, score: null, status: 'missing' };
     const d = diff(orig, local, path.join(dir, 'diff', `${s.id}.png`));
+    // Element match: each original text block and image found in the clone, in place, in style.
+    const el = origEls[s.id] ? compareSection(origEls[s.id], localEls[s.id], media) : null;
+    gaps[s.id] = el;
+    // Pixels still catch what elements can't see (backgrounds, borders, icons, image crops).
+    const blended = el?.score != null ? DOM_WEIGHT * el.score + (1 - DOM_WEIGHT) * d.score : d.score;
     // Text the visitor can't read counts as missing: scale by the share of readable characters.
     const r = readable[s.id] ?? 1;
-    const score = round(d.score * r);
-    return { id: s.id, ...d, score, status: grade(score), readable: r };
+    const score = round(blended * r);
+    return { id: s.id, ...d, pixelScore: d.score, dom: el?.score ?? null, matched: el ? `${el.matched}/${el.of}` : null, gaps: el?.gaps, worst: el?.worst, score, status: grade(score), readable: r };
   });
+  write(path.join(dir, 'gaps.json'), gaps);
   const page = diff(path.join(capDir, 'full.png'), path.join(dir, 'full.png'), path.join(dir, 'diff', 'full.png'));
   const scored = sections.filter((s) => s.score !== null);
   return {
