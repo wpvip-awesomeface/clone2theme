@@ -1,6 +1,7 @@
 // HTML -> blocks using WordPress's own converter, running in the dev-env block editor.
 import fs from 'node:fs';
 import path from 'node:path';
+import { PNG } from 'pngjs';
 import { launch } from './browser.js';
 import { devenv } from './devenv.js';
 import { read, write, exists, withRetry } from './guard.js';
@@ -43,7 +44,8 @@ export async function convert(ctx, dir) {
         continue;
       }
       const html = fs.readFileSync(path.join(exDir, 'sections', `${s.id}.html`), 'utf8');
-      const base = { html, bg: s.bg, bgColor: s.bgColor, textColor: s.textColor, linkColor: s.linkColor, role: s.role };
+      const shot = path.join(ctx.dir, 'capture', 'sections', `${s.id}.png`);
+      const base = { html, bg: s.bg, height: s.height, pad: !s.bg && exists(shot) ? padding(shot) : null, bgColor: s.bgColor, textColor: s.textColor, linkColor: s.linkColor, role: s.role };
       let out = await page.evaluate(toBlocks, base);
       const plainUnclear = !html || (out.total ? out.unclear / out.total : 1) > 0.5;
       // Plain score: the last verify of a plain conversion, carried over while Haiku's version is live.
@@ -129,10 +131,34 @@ export function guardAi(runDir) {
   return reverted;
 }
 
+// Top/bottom padding of the original section, read off its screenshot: the plain background rows
+// above the first and below the last row with any content.
+function padding(file) {
+  const { width: w, height: h, data } = PNG.sync.read(fs.readFileSync(file));
+  if (h < 20) return null;
+  const E = 3; // skip edge rows: fractional section bounds pick up a sliver of the neighbor
+  const bg = [0, 1, 2].map((c) => data[(E * w + 2) * 4 + c]);
+  const busy = (y) => {
+    let n = 0;
+    for (let x = 0; x < w; x += 2) {
+      const i = (y * w + x) * 4;
+      if (Math.abs(data[i] - bg[0]) + Math.abs(data[i + 1] - bg[1]) + Math.abs(data[i + 2] - bg[2]) > 48) n++;
+    }
+    return n > w / 2 / 200;
+  };
+  let top = E, bottom = h - 1 - E;
+  while (top < h && !busy(top)) top++;
+  while (bottom > top && !busy(bottom)) bottom--;
+  if (top >= h) return null;
+  const clamp = (n) => Math.min(240, Math.max(0, n));
+  return { top: clamp(top), bottom: clamp(h - 1 - bottom) };
+}
+
 // Content check for AI answers: every image kept, nearly all words kept.
 function fidelity(html, markup) {
   const srcs = (h) => new Set([...h.matchAll(/(?:src="|"url":")([^"]+)/g)].map((m) => m[1]));
-  const words = (h) => (h.replace(/<!--[\s\S]*?-->/g, ' ').replace(/<[^>]+>/g, ' ').match(/[\p{L}\p{N}’']+/gu) || []).length;
+  // Labels kept in block attributes (navigation links) count as text too.
+  const words = (h) => (h.replace(/<!--[\s\S]*?-->/g, (c) => [...c.matchAll(/"label":"((?:[^"\\]|\\.)*)"/g)].map((m) => ` ${m[1]} `).join(' ')).replace(/<[^>]+>/g, ' ').match(/[\p{L}\p{N}’']+/gu) || []).length;
   const out = srcs(markup);
   const missing = [...srcs(html)].filter((u) => !out.has(u)).length;
   const kept = words(markup) / Math.max(1, words(html));
@@ -143,7 +169,7 @@ function fidelity(html, markup) {
 }
 
 // Runs in the block editor page.
-function toBlocks({ html, bg, bgColor, textColor, linkColor, role, aiMarkup }) {
+function toBlocks({ html, bg, height, pad, bgColor, textColor, linkColor, role, aiMarkup }) {
   const { rawHandler, createBlock, serialize, parse, getBlockType } = wp.blocks;
 
   // rawHandler keeps nested wrappers as raw HTML, so flatten to a run of real blocks first.
@@ -200,6 +226,7 @@ function toBlocks({ html, bg, bgColor, textColor, linkColor, role, aiMarkup }) {
     size(b.innerBlocks || []);
   });
   size(inner);
+  if (!aiMarkup && (role === 'header' || role === 'footer')) inner = rows(inner);
   const counts = {};
   let total = 0, unclear = 0;
   const walk = (list) => list.forEach((b) => {
@@ -212,19 +239,43 @@ function toBlocks({ html, bg, bgColor, textColor, linkColor, role, aiMarkup }) {
   if (!inner.length) inner = [createBlock('core/paragraph', { content: '' })];
 
   const block = bg
-    ? createBlock('core/cover', { url: bg, dimRatio: 40, align: 'full', minHeight: 420, minHeightUnit: 'px', layout: { type: 'constrained' } }, inner)
+    ? createBlock('core/cover', { url: bg, dimRatio: 40, align: 'full', minHeight: height ? Math.min(height, 1200) : 420, minHeightUnit: 'px', layout: { type: 'constrained' } }, inner)
     : createBlock('core/group', {
         tagName: role === 'header' ? 'header' : role === 'footer' ? 'footer' : 'section',
         align: 'full',
         layout: { type: 'constrained' },
         style: {
-          spacing: { padding: { top: 'var:preset|spacing|50', bottom: 'var:preset|spacing|50' } },
+          // Never shorter than the original section.
+          ...(height ? { dimensions: { minHeight: `${Math.min(height, 1200)}px` } } : {}),
+          spacing: { padding: pad ? { top: `${pad.top}px`, bottom: `${pad.bottom}px` } : { top: 'var:preset|spacing|50', bottom: 'var:preset|spacing|50' } },
           // The original's own text and link colors, so dark sections don't inherit the theme's dark text.
           ...(solid(bgColor) || solid(textColor) ? { color: { ...(solid(bgColor) ? { background: solid(bgColor) } : {}), ...(solid(textColor) ? { text: solid(textColor) } : {}) } } : {}),
           ...(solid(linkColor) ? { elements: { link: { color: { text: solid(linkColor) } } } } : {}),
         },
       }, inner);
   return { markup: serialize([block]), total, unclear, counts };
+
+  // Header/footer: link-only lists become horizontal navigation; the header sits on one row,
+  // and in the footer a menu shares a row with the short text next to it (copyright).
+  function rows(list) {
+    const navs = list.map((b) => {
+      if (b.name !== 'core/list') return b;
+      const links = b.innerBlocks.map((li) => !li.innerBlocks.length && String(li.attributes.content).trim().match(/^<a\s[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>$/));
+      if (!links.length || !links.every(Boolean)) return b;
+      return createBlock('core/navigation', { layout: { type: 'flex', flexWrap: 'wrap' }, overlayMenu: 'mobile' },
+        links.map(([a, url, label]) => createBlock('core/navigation-link', { label: label.replace(/<[^>]+>/g, '').trim(), url, kind: 'custom', ...(/target="_blank"/.test(a) ? { opensInNewTab: true } : {}) })));
+    });
+    const row = (items) => createBlock('core/group', { layout: { type: 'flex', justifyContent: 'space-between', flexWrap: 'wrap' } }, items);
+    if (role === 'header') return [row(navs)];
+    const out = [];
+    navs.forEach((b) => {
+      const prev = out[out.length - 1];
+      const short = b.name === 'core/paragraph' && String(b.attributes.content).replace(/<[^>]+>/g, '').split(/\s+/).length < 15;
+      if (prev?.name === 'core/navigation' && short) out[out.length - 1] = row([prev, b]);
+      else out.push(b);
+    });
+    return out;
+  }
 
   // Section background as hex, skipping transparent ones.
   function solid(c) {
