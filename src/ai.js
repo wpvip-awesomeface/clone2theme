@@ -6,7 +6,9 @@ import crypto from 'node:crypto';
 import Anthropic from '@anthropic-ai/sdk';
 import { ROOT, exists, read, write } from './guard.js';
 
-export const MODEL = 'claude-haiku-5-5';
+// C2T_MODEL swaps the model (e.g. claude-sonnet-5-5) for comparison runs; the cache is keyed by model.
+export const MODEL = process.env.C2T_MODEL || 'claude-haiku-5-5';
+export const isAi = (label) => /^claude-/.test(label || '');
 export const DEFAULT_BUDGET = 80000; // input + output tokens per run
 const PROMPT_VERSION = 1;
 const MAX_HTML_CHARS = 40000;

@@ -5,7 +5,7 @@ import { PNG } from 'pngjs';
 import { launch } from './browser.js';
 import { devenv } from './devenv.js';
 import { read, write, exists, withRetry } from './guard.js';
-import { patternFor, budget, MODEL } from './ai.js';
+import { patternFor, budget, MODEL, isAi } from './ai.js';
 import { CLOSE, SCORER } from './verify.js';
 
 export async function convert(ctx, dir) {
@@ -50,11 +50,11 @@ export async function convert(ctx, dir) {
       const plainUnclear = !html || (out.total ? out.unclear / out.total : 1) > 0.5;
       // Plain score: the last verify of a plain conversion, carried over while Haiku's version is live.
       const p = prevBy[s.id];
-      const plainScore = (p && !p.ai?.startsWith(MODEL) ? lastScore[s.id] : p?.plainScore) ?? null;
+      const plainScore = (p && !isAi(p.ai) ? lastScore[s.id] : p?.plainScore) ?? null;
       const keepPlain = p?.keepPlain?.scorer === SCORER ? p.keepPlain : null;
       let ai = ctx.noAi ? 'skipped (--no-ai)' : 'not needed';
       if (aiStop) ai = aiStop;
-      else if (keepPlain && only !== s.id && aiOn) ai = `kept plain (Haiku ${pct(keepPlain.haiku)} vs plain ${pct(keepPlain.plain)})`;
+      else if (keepPlain && only !== s.id && aiOn) ai = `kept plain (${keepPlain.model || 'Haiku'} ${pct(keepPlain.haiku)} vs plain ${pct(keepPlain.plain)})`;
       else if (aiOn && html && (plainUnclear || weak.has(s.id) || only === s.id)) {
         const got = await withRetry(`ai:${s.id}`, async (lastErr) => {
           const r = await patternFor({ html, screenshot: path.join(ctx.dir, 'capture', 'sections', `${s.id}.png`), palette, lastError: lastErr?.message, b });
@@ -100,7 +100,7 @@ export async function convert(ctx, dir) {
     converter: siteUrl,
     sections: results,
     unclear: results.filter((r) => r.unclear).map((r) => r.id),
-    ai: { ...b.state, used: results.filter((r) => r.ai?.startsWith(MODEL)).map((r) => r.id) },
+    ai: { ...b.state, used: results.filter((r) => isAi(r.ai)).map((r) => r.id) },
   };
 }
 
@@ -118,10 +118,11 @@ export function guardAi(runDir) {
   for (const s of conv.sections) {
     const haiku = score[s.id];
     const plainFile = path.join(runDir, 'convert', 'blocks', `${s.id}.plain.html`);
-    if (!s.ai?.startsWith(MODEL) || s.plainScore == null || haiku == null || haiku > s.plainScore || !exists(plainFile)) continue;
+    if (!isAi(s.ai) || s.plainScore == null || haiku == null || haiku > s.plainScore || !exists(plainFile)) continue;
     fs.copyFileSync(plainFile, path.join(runDir, 'convert', 'blocks', `${s.id}.html`));
-    s.keepPlain = { haiku, plain: s.plainScore, scorer: SCORER };
-    s.ai = `kept plain (Haiku ${pct(haiku)} vs plain ${pct(s.plainScore)})`;
+    const model = s.ai.split(':')[0];
+    s.keepPlain = { haiku, plain: s.plainScore, scorer: SCORER, model };
+    s.ai = `kept plain (${model} ${pct(haiku)} vs plain ${pct(s.plainScore)})`;
     reverted.push(s.id);
   }
   if (reverted.length) {

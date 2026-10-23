@@ -51,7 +51,7 @@ async function pipeline(ctx, to = STEPS.length - 1) {
   // Haiku only stays where it scored higher than the plain conversion.
   const reverted = !process.exitCode && to === STEPS.length - 1 ? guardAi(ctx.dir) : [];
   if (reverted.length) {
-    log('ai', `kept plain for ${reverted.join(', ')} (Haiku scored no higher)`);
+    log('ai', `kept plain for ${reverted.join(', ')} (AI scored no higher)`);
     ctx.force = new Set(STEPS.slice(STEPS.indexOf('build')));
     await runSteps(ctx, to);
   }
