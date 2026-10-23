@@ -87,7 +87,9 @@ export async function verify(ctx, dir) {
     status,
     height,
     brokenImages: broken,
-    pageScore: page.score,
+    // Whole page = sections weighted by their original height; one full-page pixel diff swung ~30 points run to run.
+    pageScore: (() => { const h = Object.fromEntries(read(path.join(capDir, 'dom.json')).sections.map((x) => [x.id, x.height])); const w = scored.reduce((a, x) => a + (h[x.id] || 0), 0); return w ? round(scored.reduce((a, x) => a + x.score * (h[x.id] || 0), 0) / w) : page.score; })(),
+    pagePixels: page.score,
     avgScore: scored.length ? round(scored.reduce((a, s) => a + s.score, 0) / scored.length) : null,
     passing: scored.filter((s) => s.status === 'pass').length,
     sections,

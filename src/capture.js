@@ -4,7 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { launch } from './browser.js';
 import { write } from './guard.js';
-import { collectElements } from './elements.js';
+import { collectElements, collectLayout } from './elements.js';
 
 const VIEWPORT = { width: 1440, height: 900 };
 const MAX_ASSETS = 80;
@@ -21,6 +21,7 @@ export async function capture(ctx, dir) {
     await page.waitForTimeout(800);
 
     const dom = await page.evaluate(analyze);
+    dom.layout = await page.evaluate(collectLayout, 'data-c2t-section');
     dom.elements = await page.evaluate(collectElements, 'data-c2t-section');
     await page.screenshot({ path: path.join(dir, 'full.png'), fullPage: true });
 

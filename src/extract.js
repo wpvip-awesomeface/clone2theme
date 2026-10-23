@@ -34,7 +34,7 @@ export async function extract(ctx, dir) {
 
 // Runs in a JS-disabled copy of the captured DOM.
 function cleanSections() {
-  const KEEP = new Set(['href', 'src', 'alt', 'width', 'colspan', 'rowspan', 'title', 'target']);
+  const KEEP = new Set(['href', 'src', 'alt', 'width', 'colspan', 'rowspan', 'title', 'target', 'data-c2t-id']);
   const DROP = 'script,style,noscript,link,meta,template,svg,iframe,form,input,select,textarea,button:empty,[data-c2t-hidden],[aria-hidden="true"]';
   const out = {};
   document.querySelectorAll('[data-c2t-section]').forEach((sec) => {

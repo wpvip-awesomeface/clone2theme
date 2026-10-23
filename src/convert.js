@@ -21,7 +21,9 @@ export async function convert(ctx, dir) {
   if (!key) throw new Error('no dev-env autologin key (vip dev-env info)');
 
   // AI targets: sections the plain converter left as raw HTML, or that scored low last verify.
-  const palette = read(path.join(exDir, 'tokens.json')).palette;
+  const tokens = read(path.join(exDir, 'tokens.json'));
+  const palette = tokens.palette;
+  const dom = read(path.join(ctx.dir, 'capture', 'dom.json'));
   const lastVerify = exists(path.join(ctx.dir, 'verify', 'done.json')) ? read(path.join(ctx.dir, 'verify', 'done.json')) : null;
   const weak = new Set((lastVerify?.sections || []).filter((v) => v.score !== null && v.score < CLOSE).map((v) => v.id));
   const lastScore = Object.fromEntries((lastVerify?.sections || []).map((v) => [v.id, v.score]));
@@ -45,8 +47,10 @@ export async function convert(ctx, dir) {
         continue;
       }
       const html = fs.readFileSync(path.join(exDir, 'sections', `${s.id}.html`), 'utf8');
+      const aiHtml = html.replace(/ data-c2t-id="[^"]*"/g, ''); // ids are for layout lookups, not the model
       const shot = path.join(ctx.dir, 'capture', 'sections', `${s.id}.png`);
-      const base = { html, bg: s.bg, height: s.height, width: sectionWidth(s), pad: !s.bg && exists(shot) ? padding(shot) : null, bgColor: s.bgColor, textColor: s.textColor, linkColor: s.linkColor, role: s.role };
+      const base = { html, bg: s.bg, height: s.height, width: sectionWidth(s), pad: !s.bg && exists(shot) ? padding(shot) : null, bgColor: s.bgColor, textColor: s.textColor, linkColor: s.linkColor, role: s.role,
+        layout: dom.layout?.[s.id] || {}, els: dom.elements?.[s.id] || [], fonts: tokens.fonts, sizes: tokens.fontSizes };
       let out = await page.evaluate(toBlocks, base);
       const plainUnclear = !html || (out.total ? out.unclear / out.total : 1) > 0.5;
       // Plain score: the last verify of a plain conversion, carried over while Haiku's version is live.
@@ -58,11 +62,11 @@ export async function convert(ctx, dir) {
       else if (keepPlain && only !== s.id && aiOn) ai = `kept plain (${keepPlain.model || 'Haiku'} ${pct(keepPlain.haiku)} vs plain ${pct(keepPlain.plain)})`;
       else if (aiOn && html && (plainUnclear || weak.has(s.id) || only === s.id)) {
         const got = await withRetry(`ai:${s.id}`, async (lastErr) => {
-          const r = await patternFor({ html, screenshot: path.join(ctx.dir, 'capture', 'sections', `${s.id}.png`), palette, lastError: lastErr?.message, b });
+          const r = await patternFor({ html: aiHtml, screenshot: path.join(ctx.dir, 'capture', 'sections', `${s.id}.png`), palette, lastError: lastErr?.message, b });
           const o = await page.evaluate(toBlocks, { ...base, aiMarkup: r.markup });
           if (o.aiError) throw new Error(o.aiError);
           if (o.total && o.unclear / o.total > 0.3) throw new Error(`${o.unclear} of ${o.total} blocks were raw HTML`);
-          const lost = fidelity(html, r.markup);
+          const lost = fidelity(aiHtml, r.markup);
           if (lost) throw new Error(lost);
           return { ...o, pattern: r.pattern, cached: r.cached };
         }, 1);
@@ -171,43 +175,153 @@ function fidelity(html, markup) {
 }
 
 // Runs in the block editor page.
-function toBlocks({ html, bg, height, width, pad, bgColor, textColor, linkColor, role, aiMarkup }) {
+function toBlocks({ html, bg, height, width, pad, bgColor, textColor, linkColor, role, aiMarkup, layout = {}, els = [], fonts = [], sizes = [] }) {
   const { rawHandler, createBlock, serialize, parse, getBlockType } = wp.blocks;
 
-  // rawHandler keeps nested wrappers as raw HTML, so flatten to a run of real blocks first.
   const BLOCK = /^(H[1-6]|P|UL|OL|TABLE|BLOCKQUOTE|PRE|FIGURE|HR|IMG)$/;
   const INLINE = /^(A|SPAN|STRONG|EM|B|I|SMALL|BR|SUP|SUB|CODE|MARK|U|S|TIME|ABBR|LABEL)$/;
   const HAS_BLOCK = 'h1,h2,h3,h4,h5,h6,p,div,ul,ol,table,section,article,figure,blockquote';
   const doc = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html');
-  const parts = [];
-  let run = [];
-  const flush = () => {
-    const box = document.createElement('p');
-    run.forEach((n) => box.append(n.cloneNode(true)));
-    if (box.textContent.trim() || box.querySelector('img')) parts.push(box.outerHTML);
-    run = [];
-  };
-  const visit = (node) => {
+  const L = (n) => (n?.getAttribute ? layout[n.getAttribute('data-c2t-id')] : null);
+  const px = (n) => `${Math.round(n)}px`;
+  // Layout ids stay out of saved content; source-code line breaks are just spaces (not <br>), except in <pre>.
+  const leaf = (h) => rawHandler({ HTML: h.replace(/ data-c2t-id="[^"]*"/g, '').replace(/^(?![\s\S]*<pre)[\s\S]*$/, (x) => x.replace(/\s*\n\s*/g, ' ')) });
+
+  // Plain conversion keeps the original's structure: side-by-side children become columns (wide items)
+  // or a flex row (small items like links, stats, buttons); boxes with a border or their own background
+  // become framed groups (cards). Everything else flows top to bottom.
+  function build(node) {
+    const out = [];
+    let run = [];
+    const flush = () => {
+      const box = document.createElement('p');
+      run.forEach((n) => box.append(n.cloneNode(true)));
+      if (box.textContent.trim() || box.querySelector('img')) out.push(...leaf(box.outerHTML));
+      run = [];
+    };
     for (const n of [...node.childNodes]) {
       if (n.nodeType === 3) { if (n.textContent.trim()) run.push(n); continue; }
       if (n.nodeType !== 1) continue;
-      if (BLOCK.test(n.tagName)) {
-        flush();
-        n.querySelectorAll('div,section,article,header,footer,nav,aside').forEach((d) => d.replaceWith(...d.childNodes));
-        parts.push(n.outerHTML);
-      } else if (INLINE.test(n.tagName) && !n.querySelector(HAS_BLOCK)) {
+      if (BLOCK.test(n.tagName) && !rowList(n)) { flush(); out.push(...blocksOf(n)); }
+      else if (INLINE.test(n.tagName) && !n.querySelector(HAS_BLOCK)) {
+        // Inline in the HTML but drawn on its own line (display:block in CSS): start a new paragraph.
+        const b = L(n), last = [...run].reverse().find((r) => L(r));
+        if (b && last && b.y >= L(last).y + L(last).h - 2) flush();
         run.push(n);
-      } else {
-        flush();
-        visit(n);
-        flush();
-      }
+      } else { flush(); out.push(...container(n)); }
     }
-  };
-  visit(doc.body);
-  flush();
+    flush();
+    return out;
+  }
+  function rowList(n) {
+    if (!/^(UL|OL)$/.test(n.tagName) || L(n)?.d !== 'flex' && L(n)?.d !== 'grid') return false;
+    const menu = [...n.children].every((li) => li.children.length === 1 && li.firstElementChild.tagName === 'A' && li.textContent.trim() === li.firstElementChild.textContent.trim()
+      && !L(li.firstElementChild)?.bw && !L(li.firstElementChild)?.bg); // framed links are buttons
+    return !(menu && (role === 'header' || role === 'footer'));
+  }
+  function blocksOf(n) {
+    if (rowList(n)) return container(n);
+    if (BLOCK.test(n.tagName)) {
+      const c = n.cloneNode(true);
+      c.querySelectorAll('div,section,article,header,footer,nav,aside').forEach((d) => d.replaceWith(...d.childNodes));
+      return leaf(c.outerHTML);
+    }
+    if (INLINE.test(n.tagName) && !n.querySelector(HAS_BLOCK)) {
+      const p = document.createElement('p');
+      p.append(n.cloneNode(true));
+      return p.textContent.trim() || p.querySelector('img') ? leaf(p.outerHTML) : [];
+    }
+    return container(n);
+  }
+  function container(n) {
+    const kids = [...n.children];
+    const hasText = [...n.childNodes].some((c) => c.nodeType === 3 && c.textContent.trim());
+    // Row mode needs a box for every child that carries content; otherwise flow.
+    const boxed = kids.every((k) => L(k) || (!k.textContent.trim() && !k.querySelector('img')));
+    const lines = !hasText && boxed ? linesOf(kids.filter((k) => L(k))) : null;
+    const inner = lines && lines.some((l) => l.length > 1)
+      ? lines.flatMap((line) => (line.length > 1 ? rowBlock(n, line) : blocksOf(line[0])))
+      : build(n);
+    return frame(n, inner);
+  }
+  // Group children into visual lines: a child joins the line when it overlaps it vertically.
+  function linesOf(kids) {
+    const lines = [];
+    for (const k of kids) {
+      const b = L(k);
+      const line = lines[lines.length - 1];
+      const overlap = line && Math.min(b.y + b.h, line.bottom) - Math.max(b.y, line.top);
+      if (line && overlap > 0.3 * Math.min(b.h, line.minH) && b.x >= line.right - 4) {
+        line.items.push(k); line.bottom = Math.max(line.bottom, b.y + b.h); line.right = b.x + b.w; line.minH = Math.min(line.minH, b.h);
+      } else lines.push({ items: [k], top: b.y, bottom: b.y + b.h, right: b.x + b.w, minH: b.h });
+    }
+    return lines.map((l) => l.items);
+  }
+  function rowBlock(parent, line) {
+    // Items with no content (icon or line drawn in svg/CSS) stay as empty space so the rest keep their place.
+    const all = line.map((k) => ({ k, b: L(k), blocks: blocksOf(k) }));
+    const items = all.filter((x) => x.blocks.length || x.b.w >= 8);
+    if (all.filter((x) => x.blocks.length).length < 1) return [];
+    if (items.length < 2) return items.flatMap((x) => x.blocks);
+    const left = Math.min(...items.map((x) => x.b.x)), right = Math.max(...items.map((x) => x.b.x + x.b.w));
+    const span = Math.max(1, right - left);
+    const gaps = items.slice(1).map((x, i) => x.b.x - (items[i].b.x + items[i].b.w));
+    const gap = Math.max(0, Math.round(gaps.reduce((a, g) => a + g, 0) / gaps.length));
+    const tops = items.map((x) => x.b.y), mids = items.map((x) => x.b.y + x.b.h / 2);
+    const spread = (v) => Math.max(...v) - Math.min(...v);
+    const PL = L(parent);
+    const valign = PL?.d === 'flex' && PL.dir !== 'column' && PL.ai === 'center' ? 'center' : spread(tops) <= 4 ? 'top' : spread(mids) <= 6 ? 'center' : 'top';
+    const pw = L(parent)?.w || span;
+    const centered = (b) => b?.d === 'flex' && ((b.dir === 'column' && b.jc === 'center') || (b.dir !== 'column' && b.ai === 'center'));
+    if (items.filter((x) => x.blocks.length).every((x) => x.b.w >= pw * 0.2)) {
+      // A row touching the section edge bleeds: full width, padded on the side that doesn't.
+      const vw = 1440;
+      const bleedL = left <= 2 && width, bleedR = right >= vw - 2 && width;
+      const gutter = width ? (vw - width) / 2 : 0;
+      const bleed = bleedL || bleedR ? { align: 'full', style: { spacing: { blockGap: { left: px(gap) }, padding: { left: bleedL ? '0px' : px(gutter), right: bleedR ? '0px' : px(gutter) } } } } : null;
+      return [createBlock('core/columns', { ...(valign === 'center' ? { verticalAlignment: 'center' } : {}), style: { spacing: { blockGap: { left: px(gap) } } }, ...(bleed || {}) },
+        items.map((x) => createBlock('core/column', { width: `${Math.round((x.b.w / span) * 1000) / 10}%`, ...(centered(x.b) ? { verticalAlignment: 'center' } : {}) }, x.blocks)))];
+    }
+    // Justification from where the items actually sit in the parent's content box.
+    const P = L(parent), pad = P?.pad || [0, 0, 0, 0];
+    const cl = P ? P.x + pad[3] : left, cr = P ? P.x + P.w - pad[1] : right;
+    const atL = left - cl <= 8, atR = cr - right <= 8;
+    const set = { 'space-between': 'space-between', 'space-around': 'space-between', 'space-evenly': 'space-between', center: 'center', 'flex-end': 'right', end: 'right', right: 'right' }[P?.jc];
+    const jc = set && P?.d === 'flex' ? set : atL && atR ? (items.length > 1 && cr - cl - span > 8 ? 'space-between' : 'left') : atL ? 'left' : atR ? 'right' : Math.abs((left - cl) - (cr - right)) <= 12 ? 'center' : 'left';
+    return [createBlock('core/group', { layout: { type: 'flex', flexWrap: 'wrap', justifyContent: jc, verticalAlignment: valign }, style: { spacing: { blockGap: px(gap) } } },
+      items.map((x) => {
+        if (!x.blocks.length) return createBlock('core/spacer', { width: px(x.b.w), height: '0px' });
+        const item = x.blocks.length === 1 ? x.blocks[0] : createBlock('core/group', { layout: { type: 'default' } }, x.blocks);
+        // Small items keep their measured width so labels don't wrap; wide ones stay fluid for phones.
+        if (x.b.w <= 400) item.attributes.style = { ...(item.attributes.style || {}), layout: { selfStretch: 'fixed', flexSize: px(x.b.w) } };
+        return item;
+      }))];
+  }
+  // A box with a border, or a background different from what's behind it, becomes a framed group.
+  function frame(n, inner) {
+    const f = L(n);
+    if (!f || !inner.length) return inner;
+    let behind = null;
+    for (let p = n.parentElement; p && !behind; p = p.parentElement) behind = L(p)?.bg || null;
+    behind = behind || bgColor;
+    const ownBg = f.bg && solid(f.bg) !== solid(behind) ? solid(f.bg) : null;
+    if (!f.bw && !ownBg) return inner;
+    const style = {
+      ...(ownBg ? { color: { background: ownBg } } : {}),
+      ...(f.bw || f.br ? { border: { ...(f.bw ? { width: px(f.bw), color: solid(f.bc) || undefined, style: 'solid' } : {}), ...(f.br ? { radius: px(f.br) } : {}) } } : {}),
+      ...(f.pad ? { spacing: { padding: { top: px(f.pad[0]), right: px(f.pad[1]), bottom: px(f.pad[2]), left: px(f.pad[3]) } } } : {}),
+    };
+    const framed = createBlock('core/group', { style, layout: { type: 'default' } }, inner);
+    // Narrower than its parent (a card beside a cleaned-away icon): keep its width and which side it sits on.
+    let pb = null;
+    for (let p = n.parentElement; p && !pb; p = p.parentElement) pb = L(p);
+    if (!pb || f.w >= pb.w * 0.95) return [framed];
+    const offL = f.x - pb.x, offR = pb.x + pb.w - (f.x + f.w);
+    const side = Math.abs(offL - offR) <= 8 ? 'center' : offL > offR ? 'right' : 'left';
+    return [createBlock('core/group', { layout: { type: 'constrained', contentSize: px(f.w), justifyContent: side } }, [framed])];
+  }
 
-  let inner = parts.length ? rawHandler({ HTML: parts.join('\n') }) : [];
+  let inner = html ? container(doc.body) : [];
   if (aiMarkup) {
     // Rebuild from parsed names + attributes so small markup slips from the model can't leave invalid blocks.
     const unknown = new Set();
@@ -228,7 +342,8 @@ function toBlocks({ html, bg, height, width, pad, bgColor, textColor, linkColor,
     size(b.innerBlocks || []);
   });
   size(inner);
-  if (!aiMarkup && (role === 'header' || role === 'footer')) inner = rows(inner);
+  if (role === 'header' || role === 'footer') inner = rows(inner);
+  inner = styled(inner);
   const counts = {};
   let total = 0, unclear = 0;
   const walk = (list) => list.forEach((b) => {
@@ -257,18 +372,19 @@ function toBlocks({ html, bg, height, width, pad, bgColor, textColor, linkColor,
       }, inner);
   return { markup: serialize([block]), total, unclear, counts };
 
-  // Header/footer: link-only lists become horizontal navigation; the header sits on one row,
-  // and in the footer a menu shares a row with the short text next to it (copyright).
+  // Header/footer: link-only lists become horizontal navigation (at any depth). A header that is still
+  // a plain stack sits on one row; in the footer a menu shares a row with the short text next to it.
   function rows(list) {
-    const navs = list.map((b) => {
-      if (b.name !== 'core/list') return b;
+    const nav = (b) => {
+      if (b.name !== 'core/list') return { ...b, innerBlocks: (b.innerBlocks || []).map(nav) };
       const links = b.innerBlocks.map((li) => !li.innerBlocks.length && String(li.attributes.content).trim().match(/^<a\s[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>$/));
       if (!links.length || !links.every(Boolean)) return b;
       return createBlock('core/navigation', { layout: { type: 'flex', flexWrap: 'wrap' }, overlayMenu: 'mobile' },
         links.map(([a, url, label]) => createBlock('core/navigation-link', { label: label.replace(/<[^>]+>/g, '').trim(), url, kind: 'custom', ...(/target="_blank"/.test(a) ? { opensInNewTab: true } : {}) })));
-    });
+    };
+    const navs = list.map(nav);
     const row = (items) => createBlock('core/group', { layout: { type: 'flex', justifyContent: 'space-between', flexWrap: 'wrap' } }, items);
-    if (role === 'header') return [row(navs)];
+    if (role === 'header') return navs.length > 1 && !navs.some((b) => b.attributes.layout?.type === 'flex') ? [row(navs)] : navs;
     const out = [];
     navs.forEach((b) => {
       const prev = out[out.length - 1];
@@ -276,6 +392,132 @@ function toBlocks({ html, bg, height, width, pad, bgColor, textColor, linkColor,
       if (prev?.name === 'core/navigation' && short) out[out.length - 1] = row([prev, b]);
       else out.push(b);
     });
+    return out;
+  }
+
+  // Style pass, for plain and AI blocks alike: each text block and image is matched to the original
+  // element it came from (by its words, or image URL) and gets that element's measured type, color,
+  // frame and the vertical gap to the block above it. metadata.c2t records the element for the fit pass.
+  function styled(list) {
+    const words = (t) => (String(t || '').toLowerCase().match(/[\p{L}\p{N}]+/gu) || []);
+    const dice = (a, b) => {
+      const wa = words(a), wb = words(b);
+      if (!wa.length || !wb.length) return 0;
+      const count = new Map();
+      wb.forEach((w) => count.set(w, (count.get(w) || 0) + 1));
+      let common = 0;
+      wa.forEach((w) => { const n = count.get(w); if (n) { common++; count.set(w, n - 1); } });
+      return (2 * common) / (wa.length + wb.length);
+    };
+    const textOf = (b) => {
+      const a = b.attributes;
+      const v = b.name === 'core/navigation-link' ? a.label : b.name === 'core/button' ? a.text : ['core/heading', 'core/paragraph', 'core/list-item'].includes(b.name) ? a.content : null;
+      return v == null ? null : String(v).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    };
+    const used = new Set();
+    const elOf = new Map();
+    const first = (f) => String(f || '').split(',')[0].replace(/["']/g, '').trim().toLowerCase();
+    const sectionText = solid(textColor);
+    const walk = (bs) => bs.map((b) => {
+      b.innerBlocks = walk(b.innerBlocks || []);
+      if (b.name === 'core/image') {
+        const k = els.findIndex((e, i) => !used.has(i) && e.kind === 'img' && e.src === b.attributes.url);
+        if (k >= 0) {
+          used.add(k); elOf.set(b, els[k]);
+          b.attributes.metadata = { ...(b.attributes.metadata || {}), c2t: k };
+          if (els[k].frame?.br) b.attributes.style = { ...(b.attributes.style || {}), border: { ...(b.attributes.style?.border || {}), radius: px(els[k].frame.br) } };
+          // Shown cropped (overflow or object-fit cover): same visible box, image fills it.
+          if (els[k].cropped || els[k].fit === 'cover') Object.assign(b.attributes, { width: px(els[k].w), height: px(els[k].h), scale: 'cover', aspectRatio: undefined });
+        }
+        return b;
+      }
+      const t = textOf(b);
+      if (!t) return b;
+      let best = -1, score = 0.6;
+      els.forEach((e, i) => { if (e.kind === 'text' && !used.has(i)) { const d = dice(t, e.text); if (d > score) { score = d; best = i; } } });
+      if (best < 0) return b;
+      used.add(best);
+      const e = els[best];
+      // A lone link drawn as a box (border or fill) is a button, not a paragraph.
+      const link = b.name === 'core/paragraph' && String(b.attributes.content).trim().match(/^<a\s[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>$/);
+      if (link && (e.frame?.bw || e.frame?.bg)) b = createBlock('core/button', { text: link[2], url: link[1] });
+      const st = e.style || {};
+      const a = b.attributes;
+      const typo = { ...(a.style?.typography || {}) };
+      const preset = sizes.find((p) => Math.abs(parseFloat(p.size) - st.size) <= 1);
+      if (preset) { a.fontSize = preset.slug; delete typo.fontSize; } else if (st.size) { delete a.fontSize; typo.fontSize = px(st.size); }
+      if (st.weight) typo.fontWeight = String(st.weight);
+      if (st.line) typo.lineHeight = String(st.line);
+      if (st.spacing) typo.letterSpacing = `${st.spacing}px`;
+      typo.textTransform = st.upper ? 'uppercase' : undefined;
+      if (['core/heading', 'core/paragraph'].includes(b.name) && ['center', 'right', 'end'].includes(st.align)) typo.textAlign = st.align === 'end' ? 'right' : st.align;
+      const fam = fonts.find((f) => first(f.fontFamily || f.name) === st.font);
+      if (fam) a.fontFamily = fam.slug;
+      const style = { ...(a.style || {}), typography: JSON.parse(JSON.stringify(typo)) };
+      const color = solid(st.color);
+      if (color && color !== sectionText) { style.color = { ...(style.color || {}), text: color }; delete a.textColor; }
+      if (b.name === 'core/button') {
+        const f = e.frame || {};
+        style.color = { ...(style.color || {}), background: f.bg ? solid(f.bg) : 'transparent' };
+        delete a.backgroundColor;
+        style.border = { ...(f.bw ? { width: px(f.bw), color: solid(f.bc) || undefined, style: 'solid' } : { width: '0px' }), radius: px(f.br || 0) };
+        if (f.pad) style.spacing = { ...(style.spacing || {}), padding: { top: px(f.pad[0]), right: px(f.pad[1]), bottom: px(f.pad[2]), left: px(f.pad[3]) } };
+      }
+      a.style = style;
+      a.metadata = { ...(a.metadata || {}), c2t: best };
+      elOf.set(b, e);
+      return b;
+    });
+    let out = walk(list);
+    // A button left on its own needs a core/buttons wrapper.
+    const wrapButtons = (bs, parent) => {
+      const res = [];
+      for (const b of bs) {
+        b.innerBlocks = wrapButtons(b.innerBlocks || [], b);
+        if (b.name === 'core/button' && parent?.name !== 'core/buttons') {
+          const prev = res[res.length - 1];
+          if (prev?.name === 'core/buttons' && prev.c2tLoose) prev.innerBlocks.push(b);
+          else { const w = createBlock('core/buttons', {}, [b]); w.c2tLoose = true; res.push(w); }
+        } else res.push(b);
+      }
+      return res;
+    };
+    out = wrapButtons(out, null);
+    // Menus and button rows: the gap between items as drawn (text to text), not the theme default.
+    const rowGap = (bs) => bs.forEach((b) => {
+      rowGap(b.innerBlocks || []);
+      if (!['core/navigation', 'core/buttons'].includes(b.name)) return;
+      const r = b.innerBlocks.map((c) => elOf.get(c)).filter(Boolean).sort((p, q) => p.x - q.x);
+      const g = r.slice(1).map((e, i) => e.x - (r[i].x + r[i].w)).filter((v) => v >= 0);
+      if (!g.length) return;
+      const s2 = b.attributes.style || {};
+      b.attributes.style = { ...s2, spacing: { ...(s2.spacing || {}), blockGap: px(g.reduce((a, v) => a + v, 0) / g.length) } };
+    });
+    rowGap(out);
+    // Vertical gaps: in top-to-bottom lists, each block keeps the original's gap to the block above.
+    const rect = (b) => {
+      const e = elOf.get(b);
+      let r = e ? { top: e.y, bottom: e.y + e.h } : null;
+      for (const c of b.innerBlocks || []) {
+        const s = rect(c);
+        if (s) r = r ? { top: Math.min(r.top, s.top), bottom: Math.max(r.bottom, s.bottom) } : s;
+      }
+      return r;
+    };
+    const gaps = (bs, parent) => {
+      const horizontal = parent && (parent.name === 'core/columns' || parent.name === 'core/navigation' || parent.name === 'core/buttons' || parent.attributes.layout?.type === 'flex');
+      let prev = null;
+      for (const b of bs) {
+        gaps(b.innerBlocks || [], b);
+        const r = rect(b);
+        if (!horizontal && prev && r && r.top >= prev.bottom - 2) {
+          const s = b.attributes.style || {};
+          b.attributes.style = { ...s, spacing: { ...(s.spacing || {}), margin: { ...(s.spacing?.margin || {}), top: px(Math.min(240, Math.max(0, r.top - prev.bottom))) } } };
+        }
+        if (r) prev = r;
+      }
+    };
+    gaps(out, null);
     return out;
   }
 

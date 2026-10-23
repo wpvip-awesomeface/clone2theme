@@ -13,6 +13,7 @@ import { verify } from '../src/verify.js';
 import { report } from '../src/report.js';
 import { CLOSE } from '../src/verify.js';
 import { guardAi } from '../src/convert.js';
+import { fitPass, keepBetter } from '../src/fit.js';
 
 // Local secrets (ANTHROPIC_API_KEY) live in .env next to package.json; never committed.
 if (exists(path.join(ROOT, '.env'))) process.loadEnvFile(path.join(ROOT, '.env'));
@@ -31,9 +32,11 @@ const { values: o, positionals: [cmd, arg] } = parseArgs({
   allowPositionals: true,
   options: {
     site: { type: 'string' }, 'ai-budget': { type: 'string' }, run: { type: 'string' }, section: { type: 'string' }, until: { type: 'string' },
-    'no-ai': { type: 'boolean' }, 'keep-ai': { type: 'boolean' }, fresh: { type: 'boolean' }, only: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
+    'no-ai': { type: 'boolean' }, 'keep-ai': { type: 'boolean' }, 'no-fit': { type: 'boolean' }, fresh: { type: 'boolean' }, only: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
   },
 });
+
+const FIT_ROUNDS = 2;
 
 async function pipeline(ctx, to = STEPS.length - 1) {
   await runSteps(ctx, to);
@@ -54,6 +57,21 @@ async function pipeline(ctx, to = STEPS.length - 1) {
     log('ai', `kept plain for ${reverted.join(', ')} (AI scored no higher)`);
     ctx.force = new Set(STEPS.slice(STEPS.indexOf('build')));
     await runSteps(ctx, to);
+  }
+  // Fit: correct vertical gaps from what the clone rendered; a section keeps a round only if it scores higher.
+  for (let round = 1; round <= FIT_ROUNDS && !process.exitCode && to === STEPS.length - 1 && !ctx.noFit; round++) {
+    const before = Object.fromEntries(read(path.join(ctx.dir, 'verify', 'done.json')).sections.map((x) => [x.id, x.score]));
+    const changed = await fitPass(ctx);
+    if (!changed.length) break;
+    log('fit', `round ${round}: ${changed.map((c) => `${c.id} (${c.moved} gaps)`).join(', ')}`);
+    ctx.force = new Set(STEPS.slice(STEPS.indexOf('build')));
+    await runSteps(ctx, to);
+    const reverted = keepBetter(ctx, before);
+    if (reverted.length) {
+      log('fit', `round ${round}: kept the earlier spacing for ${reverted.join(', ')}`);
+      await runSteps(ctx, to);
+    }
+    if (reverted.length === changed.length) break;
   }
   const r = report(ctx);
   log('report', path.join(ctx.dir, 'report.html'));
@@ -97,6 +115,7 @@ try {
     if (i < 0 || !o.run) throw new Error(`usage: c2t step <${STEPS.join('|')}> --run <slug>`);
     const ctx = loadCtx(o.run);
     ctx.section = o.section;
+    ctx.noFit = !!o['no-fit'];
     ctx.keepAi = !!o['keep-ai']; // skip the score guard, to look at an AI version that lost
     ctx.force = new Set(o.only ? [arg] : STEPS.slice(i));
     await pipeline(ctx, o.only ? i : undefined);
