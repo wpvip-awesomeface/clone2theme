@@ -24,7 +24,7 @@ export async function extract(ctx, dir) {
   const sections = dom.sections.map((s) => {
     const c = cleaned[s.id] || { html: '', words: 0, images: 0, links: 0 };
     write(path.join(dir, 'sections', `${s.id}.html`), c.html);
-    return { ...s, words: c.words, images: c.images, links: c.links, bytes: c.html.length };
+    return { ...s, words: c.words, images: c.images, links: c.links, forms: c.forms || 0, bytes: c.html.length };
   });
   const tokens = buildTokens(dom);
   write(path.join(dir, 'sections.json'), sections);
@@ -34,11 +34,33 @@ export async function extract(ctx, dir) {
 
 // Runs in a JS-disabled copy of the captured DOM.
 function cleanSections() {
-  const KEEP = new Set(['href', 'src', 'alt', 'width', 'colspan', 'rowspan', 'title', 'target', 'data-c2t-id']);
-  const DROP = 'script,style,noscript,link,meta,template,svg,iframe,form,input,select,textarea,button:empty,[data-c2t-hidden],[aria-hidden="true"]';
+  const KEEP = new Set(['href', 'src', 'alt', 'width', 'colspan', 'rowspan', 'title', 'target', 'data-c2t-id', 'data-label', 'data-placeholder', 'data-button']);
+  const DROP = 'script,style,noscript,link,meta,template,svg,iframe,form,input,select,textarea,button:empty,[data-c2t-hidden]';
   const out = {};
   document.querySelectorAll('[data-c2t-section]').forEach((sec) => {
     const el = sec.cloneNode(true);
+    // Forms: search forms become a marker the converter turns into core/search; other forms keep
+    // their visible text (labels, headings) and lose the fields, and are counted for the report.
+    let forms = 0;
+    el.querySelectorAll('form').forEach((f) => {
+      const input = f.querySelector('input[type="search"], input[name="q"], input[name="s"], input[name="keywords"], input[name="query"]');
+      if (f.matches('[role="search"]') || f.querySelector('[role="search"]') || input) {
+        const m = document.createElement('c2t-search');
+        const label = (f.querySelector('label')?.textContent || input?.getAttribute('aria-label') || 'Search').trim().replace(/\s+/g, ' ');
+        const btn = f.querySelector('button, input[type="submit"]');
+        m.setAttribute('data-label', label);
+        m.setAttribute('data-placeholder', input?.getAttribute('placeholder') || '');
+        m.setAttribute('data-button', (btn?.textContent || btn?.getAttribute('value') || btn?.getAttribute('aria-label') || 'Search').trim());
+        if (f.getAttribute('data-c2t-id')) m.setAttribute('data-c2t-id', f.getAttribute('data-c2t-id'));
+        m.textContent = label; // keeps empty-wrapper cleanup from removing it
+        f.replaceWith(m);
+      } else {
+        forms++;
+        const d = document.createElement('div');
+        d.append(...f.childNodes);
+        f.replaceWith(d);
+      }
+    });
     el.querySelectorAll(DROP).forEach((n) => n.remove());
     el.querySelectorAll('picture source').forEach((n) => n.remove());
     el.querySelectorAll('img').forEach((img) => {
@@ -67,6 +89,7 @@ function cleanSections() {
       words,
       images: el.querySelectorAll('img').length,
       links: el.querySelectorAll('a').length,
+      forms,
     };
   });
   return out;

@@ -20,6 +20,8 @@ export function report(ctx) {
   const badKey = (s.convert?.sections || []).filter((c) => c.ai?.includes('rejected the API key'));
   if (badKey.length) needsHuman.push({ why: 'Anthropic rejected the API key (401): check ANTHROPIC_API_KEY in .env', fix: `c2t step convert --run ${ctx.run}` });
   if (noKey.length) needsHuman.push({ why: `AI pass skipped for ${noKey.length} weak sections: no Anthropic credentials`, fix: `export ANTHROPIC_API_KEY=... && c2t step convert --run ${ctx.run}` });
+  const forms = sections.filter((x) => x.forms);
+  if (forms.length) needsHuman.push({ why: `${forms.reduce((a, x) => a + x.forms, 0)} forms kept as text only (fields need a form plugin): sections ${forms.map((x) => x.id).join(', ')}` });
   if (s.push?.mediaMissing) needsHuman.push({ why: `${s.push.mediaMissing} images did not import` });
   if (s.verify?.brokenImages?.length) needsHuman.push({ why: `${s.verify.brokenImages.length} broken images on the local page` });
   const scores = Object.fromEntries((s.verify?.sections || []).map((v) => [v.id, v]));

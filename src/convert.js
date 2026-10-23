@@ -46,13 +46,15 @@ export async function convert(ctx, dir) {
         results.push(prev.sections.find((p) => p.id === s.id));
         continue;
       }
-      const html = fs.readFileSync(path.join(exDir, 'sections', `${s.id}.html`), 'utf8');
+      // A strip with no words and no images (decoration drawn in svg/CSS) becomes a sized, colored band.
+      const html = !s.words && !s.images ? '' : fs.readFileSync(path.join(exDir, 'sections', `${s.id}.html`), 'utf8');
+      const empty = !html;
       const aiHtml = html.replace(/ data-c2t-id="[^"]*"/g, ''); // ids are for layout lookups, not the model
       const shot = path.join(ctx.dir, 'capture', 'sections', `${s.id}.png`);
       const base = { html, bg: s.bg, height: s.height, width: sectionWidth(s), pad: !s.bg && exists(shot) ? padding(shot) : null, bgColor: s.bgColor, textColor: s.textColor, linkColor: s.linkColor, role: s.role,
         layout: dom.layout?.[s.id] || {}, els: dom.elements?.[s.id] || [], fonts: tokens.fonts, sizes: tokens.fontSizes };
       let out = await page.evaluate(toBlocks, base);
-      const plainUnclear = !html || (out.total ? out.unclear / out.total : 1) > 0.5;
+      const plainUnclear = !empty && (out.total ? out.unclear / out.total : 1) > 0.5;
       // Plain score: the last verify of a plain conversion, carried over while Haiku's version is live.
       const p = prevBy[s.id];
       const plainScore = (p && !isAi(p.ai) ? lastScore[s.id] : p?.plainScore) ?? null;
@@ -90,7 +92,7 @@ export async function convert(ctx, dir) {
         heading: s.heading,
         blocks: out.total,
         counts: out.counts,
-        unclear: !html || unclearShare > 0.5,
+        unclear: !empty && unclearShare > 0.5,
         unclearShare: Math.round(unclearShare * 100) / 100,
         ai,
         plainScore,
@@ -202,7 +204,8 @@ function toBlocks({ html, bg, height, width, pad, bgColor, textColor, linkColor,
     for (const n of [...node.childNodes]) {
       if (n.nodeType === 3) { if (n.textContent.trim()) run.push(n); continue; }
       if (n.nodeType !== 1) continue;
-      if (BLOCK.test(n.tagName) && !rowList(n)) { flush(); out.push(...blocksOf(n)); }
+      if (n.tagName === 'C2T-SEARCH') { flush(); out.push(...blocksOf(n)); }
+      else if (BLOCK.test(n.tagName) && !rowList(n)) { flush(); out.push(...blocksOf(n)); }
       else if (INLINE.test(n.tagName) && !n.querySelector(HAS_BLOCK)) {
         // Inline in the HTML but drawn on its own line (display:block in CSS): start a new paragraph.
         const b = L(n), last = [...run].reverse().find((r) => L(r));
@@ -220,6 +223,9 @@ function toBlocks({ html, bg, height, width, pad, bgColor, textColor, linkColor,
     return !(menu && (role === 'header' || role === 'footer'));
   }
   function blocksOf(n) {
+    if (n.tagName === 'C2T-SEARCH') {
+      return [createBlock('core/search', { label: n.getAttribute('data-label') || 'Search', showLabel: false, placeholder: n.getAttribute('data-placeholder') || '', buttonText: n.getAttribute('data-button') || 'Search' })];
+    }
     if (rowList(n)) return container(n);
     if (BLOCK.test(n.tagName)) {
       const c = n.cloneNode(true);
@@ -238,24 +244,26 @@ function toBlocks({ html, bg, height, width, pad, bgColor, textColor, linkColor,
     const hasText = [...n.childNodes].some((c) => c.nodeType === 3 && c.textContent.trim());
     // Row mode needs a box for every child that carries content; otherwise flow.
     const boxed = kids.every((k) => L(k) || (!k.textContent.trim() && !k.querySelector('img')));
-    const lines = !hasText && boxed ? linesOf(kids.filter((k) => L(k))) : null;
+    const flow = kids.filter((k) => L(k) && !L(k).abs);
+    const lines = !hasText && boxed ? linesOf(flow) : null;
+    // Absolutely positioned children with content (badges, overlays) still keep their content, after the rows.
     const inner = lines && lines.some((l) => l.length > 1)
-      ? lines.flatMap((line) => (line.length > 1 ? rowBlock(n, line) : blocksOf(line[0])))
+      ? [...lines.flatMap((line) => (line.length > 1 ? rowBlock(n, line) : blocksOf(line[0]))), ...kids.filter((k) => L(k)?.abs).flatMap(blocksOf)]
       : build(n);
     return frame(n, inner);
   }
-  // Group children into visual lines: a child joins the line when it overlaps it vertically.
+  // Group children into visual lines: a child joins a line it overlaps vertically without overlapping
+  // any item in it horizontally (DOM order can differ from drawing order). Items are then left to right.
   function linesOf(kids) {
     const lines = [];
     for (const k of kids) {
       const b = L(k);
-      const line = lines[lines.length - 1];
-      const overlap = line && Math.min(b.y + b.h, line.bottom) - Math.max(b.y, line.top);
-      if (line && overlap > 0.3 * Math.min(b.h, line.minH) && b.x >= line.right - 4) {
-        line.items.push(k); line.bottom = Math.max(line.bottom, b.y + b.h); line.right = b.x + b.w; line.minH = Math.min(line.minH, b.h);
-      } else lines.push({ items: [k], top: b.y, bottom: b.y + b.h, right: b.x + b.w, minH: b.h });
+      const line = lines.find((l) => Math.min(b.y + b.h, l.bottom) - Math.max(b.y, l.top) > 0.3 * Math.min(b.h, l.minH)
+        && l.items.every((i) => { const q = L(i); return b.x >= q.x + q.w - 4 || b.x + b.w <= q.x + 4; }));
+      if (line) { line.items.push(k); line.top = Math.min(line.top, b.y); line.bottom = Math.max(line.bottom, b.y + b.h); line.minH = Math.min(line.minH, b.h); }
+      else lines.push({ items: [k], top: b.y, bottom: b.y + b.h, minH: b.h });
     }
-    return lines.map((l) => l.items);
+    return lines.sort((p, q) => p.top - q.top).map((l) => l.items.sort((p, q) => L(p).x - L(q).x));
   }
   function rowBlock(parent, line) {
     // Items with no content (icon or line drawn in svg/CSS) stay as empty space so the rest keep their place.
@@ -288,12 +296,13 @@ function toBlocks({ html, bg, height, width, pad, bgColor, textColor, linkColor,
     const atL = left - cl <= 8, atR = cr - right <= 8;
     const set = { 'space-between': 'space-between', 'space-around': 'space-between', 'space-evenly': 'space-between', center: 'center', 'flex-end': 'right', end: 'right', right: 'right' }[P?.jc];
     const jc = set && P?.d === 'flex' ? set : atL && atR ? (items.length > 1 && cr - cl - span > 8 ? 'space-between' : 'left') : atL ? 'left' : atR ? 'right' : Math.abs((left - cl) - (cr - right)) <= 12 ? 'center' : 'left';
-    return [createBlock('core/group', { layout: { type: 'flex', flexWrap: 'wrap', justifyContent: jc, verticalAlignment: valign }, style: { spacing: { blockGap: px(gap) } } },
+    // A row that fits on a phone never wraps (it was one line in the original); wider rows may wrap.
+    return [createBlock('core/group', { layout: { type: 'flex', flexWrap: span <= 400 ? 'nowrap' : 'wrap', justifyContent: jc, verticalAlignment: valign }, style: { spacing: { blockGap: px(gap) } } },
       items.map((x) => {
         if (!x.blocks.length) return createBlock('core/spacer', { width: px(x.b.w), height: '0px' });
         const item = x.blocks.length === 1 ? x.blocks[0] : createBlock('core/group', { layout: { type: 'default' } }, x.blocks);
         // Small items keep their measured width so labels don't wrap; wide ones stay fluid for phones.
-        if (x.b.w <= 400) item.attributes.style = { ...(item.attributes.style || {}), layout: { selfStretch: 'fixed', flexSize: px(x.b.w) } };
+        if (x.b.w <= 400) item.attributes.style = { ...(item.attributes.style || {}), layout: { selfStretch: 'fixed', flexSize: px(x.b.w + 2) } }; // +2: sub-pixel slack
         return item;
       }))];
   }
@@ -440,7 +449,11 @@ function toBlocks({ html, bg, height, width, pad, bgColor, textColor, linkColor,
       const e = els[best];
       // A lone link drawn as a box (border or fill) is a button, not a paragraph.
       const link = b.name === 'core/paragraph' && String(b.attributes.content).trim().match(/^<a\s[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>$/);
-      if (link && (e.frame?.bw || e.frame?.bg)) b = createBlock('core/button', { text: link[2], url: link[1] });
+      if (link && (e.frame?.bw || e.frame?.bg)) {
+        const flex = b.attributes.style?.layout; // its place in a flex row moves to the buttons wrapper
+        b = createBlock('core/button', { text: link[2], url: link[1] });
+        if (flex) b.c2tFlex = flex;
+      }
       const st = e.style || {};
       const a = b.attributes;
       const typo = { ...(a.style?.typography || {}) };
@@ -474,11 +487,9 @@ function toBlocks({ html, bg, height, width, pad, bgColor, textColor, linkColor,
       const res = [];
       for (const b of bs) {
         b.innerBlocks = wrapButtons(b.innerBlocks || [], b);
-        if (b.name === 'core/button' && parent?.name !== 'core/buttons') {
-          const prev = res[res.length - 1];
-          if (prev?.name === 'core/buttons' && prev.c2tLoose) prev.innerBlocks.push(b);
-          else { const w = createBlock('core/buttons', {}, [b]); w.c2tLoose = true; res.push(w); }
-        } else res.push(b);
+        // Each loose button gets its own wrapper: they were separate items in the original row.
+        if (b.name === 'core/button' && parent?.name !== 'core/buttons') res.push(createBlock('core/buttons', b.c2tFlex ? { style: { layout: b.c2tFlex } } : {}, [b]));
+        else res.push(b);
       }
       return res;
     };
@@ -486,7 +497,7 @@ function toBlocks({ html, bg, height, width, pad, bgColor, textColor, linkColor,
     // Menus and button rows: the gap between items as drawn (text to text), not the theme default.
     const rowGap = (bs) => bs.forEach((b) => {
       rowGap(b.innerBlocks || []);
-      if (!['core/navigation', 'core/buttons'].includes(b.name)) return;
+      if (b.name !== 'core/navigation') return; // button gaps are frame to frame, set by the row
       const r = b.innerBlocks.map((c) => elOf.get(c)).filter(Boolean).sort((p, q) => p.x - q.x);
       const g = r.slice(1).map((e, i) => e.x - (r[i].x + r[i].w)).filter((v) => v >= 0);
       if (!g.length) return;

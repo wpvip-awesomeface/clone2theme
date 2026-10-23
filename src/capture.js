@@ -20,6 +20,7 @@ export async function capture(ctx, dir) {
     await autoScroll(page);
     await page.waitForTimeout(800);
 
+    await page.evaluate(plainColors);
     const dom = await page.evaluate(analyze);
     dom.layout = await page.evaluate(collectLayout, 'data-c2t-section');
     dom.elements = await page.evaluate(collectElements, 'data-c2t-section');
@@ -61,6 +62,36 @@ async function autoScroll(page) {
   });
 }
 
+// Runs inside the page first. Modern color syntax (oklch, lab, color(), color-mix) comes back from
+// getComputedStyle as written; everything downstream reads rgb(). Wrap getComputedStyle so color
+// properties are converted by the browser itself (paint one pixel, read it back).
+function plainColors() {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 1;
+  const cx = cv.getContext('2d', { willReadFrequently: true });
+  const cache = new Map();
+  const rgb = (c) => {
+    if (typeof c !== 'string' || !/(oklch|oklab|lch\(|lab\(|color\(|hwb\(|color-mix)/.test(c)) return c;
+    if (cache.has(c)) return cache.get(c);
+    cx.clearRect(0, 0, 1, 1);
+    cx.fillStyle = '#000';
+    cx.fillStyle = c;
+    cx.fillRect(0, 0, 1, 1);
+    const [r, g, b, a] = cx.getImageData(0, 0, 1, 1).data;
+    const out = a === 255 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${Math.round((a / 255) * 100) / 100})`;
+    cache.set(c, out);
+    return out;
+  };
+  const orig = window.getComputedStyle.bind(window);
+  window.getComputedStyle = (el, pseudo) => new Proxy(orig(el, pseudo), {
+    get(t, p) {
+      const v = Reflect.get(t, p);
+      if (typeof v === 'function') return v.bind(t);
+      return typeof p === 'string' && /color$/i.test(p) ? rgb(v) : v;
+    },
+  });
+}
+
 // Runs inside the page. Marks sections and hidden nodes, then returns layout + tokens.
 function analyze() {
   const H = (el) => el.getBoundingClientRect().height;
@@ -87,6 +118,32 @@ function analyze() {
     }
     return [c];
   });
+  // A page built inside one wrapper would otherwise be one 8000px section: split tall candidates that
+  // are a stack of full-width bands into those bands (columns side by side are never split).
+  const W = (el) => el.getBoundingClientRect().width;
+  const stacked = (kids) => kids.every((k, i) => !i || kids[i - 1].getBoundingClientRect().bottom - 2 <= k.getBoundingClientRect().top);
+  const split = (c, depth = 0) => {
+    if (depth > 5 || H(c) < innerHeight * 1.5) return [c];
+    const kids = [...c.children].filter((k) => !SKIP.has(k.tagName) && visible(k) && H(k) >= 40);
+    // Only page bands count: children as wide as the viewport. Rows inside a content column (a timeline,
+    // a card list) stay together in their section.
+    const band = (k) => W(k) >= innerWidth * 0.85; // inset page wrappers (basecamp ~96%) count; content rows (dentalcorp timeline 80%) do not
+    // Descend through a single wrapper only if that yields several bands; otherwise keep the outer
+    // element so the section's origin (and every position measured from it) stays put.
+    if (kids.length === 1 && band(kids[0]) && H(kids[0]) > H(c) * 0.6) { const inner = split(kids[0], depth + 1); return inner.length > 1 ? inner : [c]; }
+    if (kids.length < 2 || !stacked(kids) || !kids.every(band)) return [c];
+    return kids.flatMap((k) => split(k, depth + 1));
+  };
+  candidates = candidates.flatMap((c) => split(c));
+  // The background a section sits on, even when it's drawn by a wrapper above it.
+  const backdrop = (el) => {
+    for (let n = el; n; n = n.parentElement) {
+      const c = getComputedStyle(n).backgroundColor;
+      const a = (c.match(/[\d.]+/g) || []).map(Number)[3] ?? 1;
+      if (!/^rgba?\(0, 0, 0, 0\)$/.test(c) && c !== 'transparent' && a >= 0.5) return c;
+    }
+    return getComputedStyle(document.body).backgroundColor;
+  };
 
   // Most-used text and link colors inside a section, weighted by visible characters.
   const inkColors = (el) => {
@@ -139,7 +196,7 @@ function analyze() {
       height: Math.round(r.height),
       heading: (el.querySelector('h1,h2,h3')?.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 80),
       bg: bg && !bg.startsWith('data:') ? new URL(bg, location.href).href : null,
-      bgColor: getComputedStyle(el).backgroundColor,
+      bgColor: backdrop(el),
       box: contentBox(el),
       ...inkColors(el),
     };

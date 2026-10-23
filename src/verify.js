@@ -28,6 +28,14 @@ export async function verify(ctx, dir) {
     status = res?.status() ?? 0;
     // Dev-env toolbars sit on top of the page and would count as differences.
     await page.addStyleTag({ content: '#wpadminbar,#a8c-debug-flag,[id*="debug-bar"],[class*="debug-bar"]{display:none!important}html{margin-top:0!important}' });
+    // Lazy images below the fold are 0×0 until loaded; load them all so measurements see the real page.
+    await page.evaluate(async () => {
+      document.querySelectorAll('img[loading="lazy"]').forEach((i) => { i.loading = 'eager'; });
+      await Promise.race([
+        Promise.all([...document.images].map((i) => (i.complete ? null : new Promise((r) => { i.onload = i.onerror = r; })))),
+        new Promise((r) => setTimeout(r, 8000)),
+      ]);
+    });
     await page.screenshot({ path: path.join(dir, 'full.png'), fullPage: true });
     height = await page.evaluate(() => document.documentElement.scrollHeight);
     broken = await page.evaluate(() => [...document.images].filter((i) => i.complete && !i.naturalWidth).map((i) => i.src).slice(0, 20));

@@ -123,6 +123,7 @@ export function collectLayout(attr) {
       el.setAttribute('data-c2t-id', key);
       const cs = getComputedStyle(el);
       const e = { x: Math.round(r.left - base.left), y: Math.round(r.top - base.top), w: Math.round(r.width), h: Math.round(r.height) };
+      if (cs.position === 'absolute' || cs.position === 'fixed') e.abs = true; // overlays/decoration, not part of the flow
       if (/flex|grid/.test(cs.display)) {
         e.d = cs.display.includes('grid') ? 'grid' : 'flex';
         e.dir = cs.flexDirection;
@@ -173,7 +174,8 @@ export function compareSection(origAll = [], clone = [], media = {}) {
   const freeImg = clone.map((c, i) => (c.kind === 'img' ? i : -1)).filter((i) => i >= 0);
   orig.forEach((o, i) => {
     if (o.kind !== 'img') return;
-    const want = localStem[stem(o.src)] || stem(o.src);
+    // Exact URL first: the same file name can come from two hosts and upload twice.
+    const want = (media[o.src] && stem(media[o.src])) || localStem[stem(o.src)] || stem(o.src);
     const k = freeImg.findIndex((j) => stem(clone[j].src) === want);
     if (k >= 0) { pairs[i] = { j: freeImg[k] }; freeImg.splice(k, 1); }
   });

@@ -57,6 +57,8 @@ function themeJson(t) {
         }),
         fontSizes: t.fontSizes.length ? t.fontSizes : undefined,
         defaultFontSizes: !t.fontSizes.length,
+        // Sizes are exact at the 1440px capture width and shrink on phones (big headlines don't overflow).
+        fluid: { maxViewportWidth: '1440px', minFontSize: '14px' },
       },
     },
     styles: {
