@@ -12,6 +12,7 @@ import { push } from '../src/push.js';
 import { verify } from '../src/verify.js';
 import { report } from '../src/report.js';
 import { CLOSE } from '../src/verify.js';
+import { guardAi } from '../src/convert.js';
 
 // Local secrets (ANTHROPIC_API_KEY) live in .env next to package.json; never committed.
 if (exists(path.join(ROOT, '.env'))) process.loadEnvFile(path.join(ROOT, '.env'));
@@ -39,11 +40,19 @@ async function pipeline(ctx, to = STEPS.length - 1) {
   // One AI pass: re-convert weak sections now that verify has scored them.
   const v = exists(path.join(ctx.dir, 'verify', 'done.json')) ? read(path.join(ctx.dir, 'verify', 'done.json')) : null;
   const conv = exists(path.join(ctx.dir, 'convert', 'done.json')) ? read(path.join(ctx.dir, 'convert', 'done.json')) : null;
-  const weak = (v?.sections || []).filter((x) => x.score !== null && x.score < CLOSE && !conv?.ai?.used?.includes(x.id));
+  const weak = (v?.sections || []).filter((x) => x.score !== null && x.score < CLOSE && !conv?.ai?.used?.includes(x.id)
+    && !conv?.sections.find((c) => c.id === x.id)?.keepPlain);
   if (!process.exitCode && to === STEPS.length - 1 && !ctx.noAi && weak.length && !ctx.aiPass) {
     log('ai', `pass for ${weak.length} weak sections: ${weak.map((x) => x.id).join(', ')}`);
     ctx.aiPass = true;
     ctx.force = new Set(STEPS.slice(STEPS.indexOf('convert')));
+    await runSteps(ctx, to);
+  }
+  // Haiku only stays where it scored higher than the plain conversion.
+  const reverted = !process.exitCode && to === STEPS.length - 1 ? guardAi(ctx.dir) : [];
+  if (reverted.length) {
+    log('ai', `kept plain for ${reverted.join(', ')} (Haiku scored no higher)`);
+    ctx.force = new Set(STEPS.slice(STEPS.indexOf('build')));
     await runSteps(ctx, to);
   }
   const r = report(ctx);

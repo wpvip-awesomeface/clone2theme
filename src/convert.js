@@ -22,6 +22,8 @@ export async function convert(ctx, dir) {
   const palette = read(path.join(exDir, 'tokens.json')).palette;
   const lastVerify = exists(path.join(ctx.dir, 'verify', 'done.json')) ? read(path.join(ctx.dir, 'verify', 'done.json')) : null;
   const weak = new Set((lastVerify?.sections || []).filter((v) => v.score !== null && v.score < CLOSE).map((v) => v.id));
+  const lastScore = Object.fromEntries((lastVerify?.sections || []).map((v) => [v.id, v.score]));
+  const prevBy = Object.fromEntries((prev?.sections || []).map((p) => [p.id, p]));
   const aiOn = !ctx.noAi; // cache hits work offline; live calls need credentials
   const b = budget(ctx);
   let aiStop = null;
@@ -44,8 +46,13 @@ export async function convert(ctx, dir) {
       const base = { html, bg: s.bg, bgColor: s.bgColor, role: s.role };
       let out = await page.evaluate(toBlocks, base);
       const plainUnclear = !html || (out.total ? out.unclear / out.total : 1) > 0.5;
+      // Plain score: the last verify of a plain conversion, carried over while Haiku's version is live.
+      const p = prevBy[s.id];
+      const plainScore = (p && !p.ai?.startsWith(MODEL) ? lastScore[s.id] : p?.plainScore) ?? null;
+      const keepPlain = p?.keepPlain || null;
       let ai = ctx.noAi ? 'skipped (--no-ai)' : 'not needed';
       if (aiStop) ai = aiStop;
+      else if (keepPlain && only !== s.id) ai = `kept plain (Haiku ${pct(keepPlain.haiku)} vs plain ${pct(keepPlain.plain)})`;
       else if (aiOn && html && (plainUnclear || weak.has(s.id) || only === s.id)) {
         const got = await withRetry(`ai:${s.id}`, async (lastErr) => {
           const r = await patternFor({ html, screenshot: path.join(ctx.dir, 'capture', 'sections', `${s.id}.png`), palette, lastError: lastErr?.message, b });
@@ -62,7 +69,11 @@ export async function convert(ctx, dir) {
           else if (/authentication_error|invalid x-api-key|^401/.test(got.error)) aiStop = 'skipped (Anthropic rejected the API key)';
           ai = aiStop || `failed: ${got.error}`;
         }
-        else { out = got; ai = `${MODEL}: ${got.pattern}${got.cached ? ' (cached)' : ''}`; }
+        else {
+          write(path.join(dir, 'blocks', `${s.id}.plain.html`), out.markup); // the score guard may swap back to this
+          out = got;
+          ai = `${MODEL}: ${got.pattern}${got.cached ? ' (cached)' : ''}`;
+        }
       }
       write(path.join(dir, 'blocks', `${s.id}.html`), out.markup);
       const unclearShare = out.total ? out.unclear / out.total : 1;
@@ -75,6 +86,8 @@ export async function convert(ctx, dir) {
         unclear: !html || unclearShare > 0.5,
         unclearShare: Math.round(unclearShare * 100) / 100,
         ai,
+        plainScore,
+        keepPlain: ai.startsWith('kept plain') ? keepPlain : null,
       });
     }
   } finally {
@@ -87,6 +100,33 @@ export async function convert(ctx, dir) {
     unclear: results.filter((r) => r.unclear).map((r) => r.id),
     ai: { ...b.state, used: results.filter((r) => r.ai?.startsWith(MODEL)).map((r) => r.id) },
   };
+}
+
+const pct = (n) => `${Math.round(n * 100)}%`;
+
+// Score guard, run after verify: a Haiku rebuild that doesn't beat the plain conversion is swapped back
+// and pinned to plain so later runs don't re-apply it. Returns the reverted section ids.
+export function guardAi(runDir) {
+  const convFile = path.join(runDir, 'convert', 'done.json');
+  const verFile = path.join(runDir, 'verify', 'done.json');
+  if (!exists(convFile) || !exists(verFile)) return [];
+  const conv = read(convFile);
+  const score = Object.fromEntries(read(verFile).sections.map((v) => [v.id, v.score]));
+  const reverted = [];
+  for (const s of conv.sections) {
+    const haiku = score[s.id];
+    const plainFile = path.join(runDir, 'convert', 'blocks', `${s.id}.plain.html`);
+    if (!s.ai?.startsWith(MODEL) || s.plainScore == null || haiku == null || haiku > s.plainScore || !exists(plainFile)) continue;
+    fs.copyFileSync(plainFile, path.join(runDir, 'convert', 'blocks', `${s.id}.html`));
+    s.keepPlain = { haiku, plain: s.plainScore };
+    s.ai = `kept plain (Haiku ${pct(haiku)} vs plain ${pct(s.plainScore)})`;
+    reverted.push(s.id);
+  }
+  if (reverted.length) {
+    conv.ai.used = conv.ai.used.filter((id) => !reverted.includes(id));
+    write(convFile, conv);
+  }
+  return reverted;
 }
 
 // Content check for AI answers: every image kept, nearly all words kept.

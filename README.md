@@ -43,6 +43,10 @@ Without `--no-ai`, after the first verify, sections that came out as raw HTML or
 markup slips can't leave invalid blocks. Unknown blocks or mostly-raw-HTML answers get one retry with the
 error, then fall back to the plain conversion and land in "needs a human".
 
+- Score guard: after verify, a Haiku rebuild that scores no higher than the plain conversion is swapped back
+  (`convert/blocks/<id>.plain.html`) and pinned to plain in `convert/done.json` (`keepPlain`), so reruns skip it.
+  `step convert --section <n>` retries Haiku for a pinned section. The guard trusts the score: it can keep a plain
+  version that looks worse (e.g. unreadable text on a dark background) if Haiku's layout is a different height.
 - Cache: `cache/ai/<sha256 of model, prompt version, html, palette, screenshot>.json`. A section is never paid for twice, and cache hits work offline.
 - Token cap: `--ai-budget` per run (input + output, tracked in `runs/<slug>/ai-usage.json`). Calls that won't fit are skipped, not truncated.
 - Credentials: `ANTHROPIC_API_KEY` in `.env` next to `package.json` (copy `.env.example`; gitignored), the shell env, or an `ant auth login` profile. Without them the pass is skipped with one report line.
