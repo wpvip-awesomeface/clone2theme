@@ -10,6 +10,9 @@ export async function push(ctx, dir) {
   const env = devenv(ctx.site);
   const b = read(path.join(ctx.dir, 'build', 'done.json'));
   const dom = read(path.join(ctx.dir, 'capture', 'dom.json'));
+  // Pictures the converter made (decorative bands) import like captured images.
+  const extra = path.join(ctx.dir, 'convert', 'assets.json');
+  if (exists(extra)) dom.assets = { ...dom.assets, ...read(extra) };
   const prev = exists(path.join(dir, 'state.json')) ? read(path.join(dir, 'state.json')) : {};
   const siteSlug = b.themeSlug;
   const url = env.ensureSite(siteSlug, read(path.join(ctx.dir, 'capture', 'done.json')).title || ctx.run);

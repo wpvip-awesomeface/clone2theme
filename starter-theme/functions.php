@@ -18,3 +18,18 @@ add_action(
 		register_block_pattern_category( 'c2t-items', array( 'label' => __( 'Repeating items', 'c2t' ) ) );
 	}
 );
+
+// "No bullets" list style: many sites draw link lists and menus without markers.
+add_action(
+	'init',
+	function () {
+		register_block_style(
+			'core/list',
+			array(
+				'name'         => 'plain',
+				'label'        => __( 'No bullets', 'c2t' ),
+				'inline_style' => '.wp-block-list.is-style-plain{list-style:none;padding-left:0}',
+			)
+		);
+	}
+);

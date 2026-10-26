@@ -334,7 +334,7 @@ async function exportVectors(page, dom, dir) {
     return out;
   }, MAX_VECTORS);
   if (!found.length) return {};
-  const solo = await page.addStyleTag({ content: '*{visibility:hidden!important}[data-c2t-solo],[data-c2t-solo] *{visibility:visible!important}' });
+  const solo = await page.addStyleTag({ content: '*{visibility:hidden!important}html,body{background:transparent!important}[data-c2t-solo],[data-c2t-solo] *{visibility:visible!important}' });
   const files = {};
   for (const v of found) {
     const sel = `[data-c2t-vector="${v.key}"]`;

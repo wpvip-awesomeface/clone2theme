@@ -69,6 +69,8 @@ function cleanSections() {
       else img.remove();
     });
     // Buttons that are really links become links so they survive conversion.
+    // Skip links ("Skip to main content") are keyboard helpers, hidden until focused: not page content.
+    el.querySelectorAll('a[href^="#"]').forEach((a) => { if (/^\s*skip\b/i.test(a.textContent)) a.remove(); });
     // Tags with no block of their own would end up as raw HTML: map them onto ones that convert.
     const swap = (n, tag) => {
       const d = document.createElement(tag);

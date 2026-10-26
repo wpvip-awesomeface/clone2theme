@@ -12,13 +12,22 @@ export function collectElements(attr) {
   const shown = (el) => { for (let n = el; n; n = n.parentElement) { if (n.hasAttribute?.('data-c2t-hidden') || !visible(n)) return false; if (n.hasAttribute?.(attr)) return true; } return true; };
   const SKIP = 'script,style,noscript,template,svg,button.screen-reader-text,.screen-reader-text';
   const frame = (cs) => boxStyle(cs);
+  // A full box (same border all round) is bw/bc; single lines (a rule under a row) are listed per side.
+  function borders(cs) {
+    const clear = (c) => ((c.match(/[\d.]+/g) || []).map(Number)[3] ?? 1) < 0.1 || c === 'transparent';
+    const side = (k) => { const w = cs[`border${k}Style`] === 'none' || clear(cs[`border${k}Color`]) ? 0 : parseFloat(cs[`border${k}Width`]) || 0; return w ? { w, c: cs[`border${k}Color`] } : null; };
+    const s4 = { top: side('Top'), right: side('Right'), bottom: side('Bottom'), left: side('Left') };
+    const on = Object.entries(s4).filter(([, v]) => v);
+    if (!on.length) return {};
+    if (on.length === 4 && on.every(([, v]) => v.w === s4.top.w && v.c === s4.top.c)) return { bw: s4.top.w, bc: s4.top.c };
+    return { lines: Object.fromEntries(on) };
+  }
   // Visual frame of a box: background, border, radius, padding (only what is set).
   function boxStyle(cs) {
     const f = {};
     const bg = cs.backgroundColor.match(/[\d.]+/g)?.map(Number);
     if (bg && (bg[3] ?? 1) >= 0.5) f.bg = cs.backgroundColor;
-    const bw = parseFloat(cs.borderTopWidth) || 0;
-    if (bw && cs.borderTopStyle !== 'none') { f.bw = bw; f.bc = cs.borderTopColor; }
+    Object.assign(f, borders(cs));
     const br = parseFloat(cs.borderTopLeftRadius) || 0;
     if (br) f.br = br;
     const pad = ['Top', 'Right', 'Bottom', 'Left'].map((k) => Math.round(parseFloat(cs[`padding${k}`]) || 0));
@@ -109,6 +118,16 @@ export function collectElements(attr) {
 // stable data-c2t-id (it survives cleaning) and records its box, flex/grid setup and visual frame,
 // so the converter can rebuild rows, columns and cards instead of flattening them.
 export function collectLayout(attr) {
+  // A full box (same border all round) is bw/bc; single lines (a rule under a row) are listed per side.
+  function borders(cs) {
+    const clear = (c) => ((c.match(/[\d.]+/g) || []).map(Number)[3] ?? 1) < 0.1 || c === 'transparent';
+    const side = (k) => { const w = cs[`border${k}Style`] === 'none' || clear(cs[`border${k}Color`]) ? 0 : parseFloat(cs[`border${k}Width`]) || 0; return w ? { w, c: cs[`border${k}Color`] } : null; };
+    const s4 = { top: side('Top'), right: side('Right'), bottom: side('Bottom'), left: side('Left') };
+    const on = Object.entries(s4).filter(([, v]) => v);
+    if (!on.length) return {};
+    if (on.length === 4 && on.every(([, v]) => v.w === s4.top.w && v.c === s4.top.c)) return { bw: s4.top.w, bc: s4.top.c };
+    return { lines: Object.fromEntries(on) };
+  }
   const out = {};
   document.querySelectorAll(`[${attr}]`).forEach((sec) => {
     const id = sec.getAttribute(attr);
@@ -124,6 +143,7 @@ export function collectLayout(attr) {
       const cs = getComputedStyle(el);
       const e = { x: Math.round(r.left - base.left), y: Math.round(r.top - base.top), w: Math.round(r.width), h: Math.round(r.height) };
       if (cs.position === 'absolute' || cs.position === 'fixed') e.abs = true; // overlays/decoration, not part of the flow
+      if (/^(UL|OL)$/.test(el.tagName) && cs.listStyleType === 'none') e.plain = true; // no bullets
       if (/flex|grid/.test(cs.display)) {
         e.d = cs.display.includes('grid') ? 'grid' : 'flex';
         e.dir = cs.flexDirection;
@@ -133,8 +153,7 @@ export function collectLayout(attr) {
       }
       const bg = cs.backgroundColor.match(/[\d.]+/g)?.map(Number);
       if (bg && (bg[3] ?? 1) >= 0.5) e.bg = cs.backgroundColor;
-      const bw = parseFloat(cs.borderTopWidth) || 0;
-      if (bw && cs.borderTopStyle !== 'none') { e.bw = bw; e.bc = cs.borderTopColor; }
+      Object.assign(e, borders(cs));
       const br = parseFloat(cs.borderTopLeftRadius) || 0;
       if (br) e.br = br;
       const pad = ['Top', 'Right', 'Bottom', 'Left'].map((k) => Math.round(parseFloat(cs[`padding${k}`]) || 0));

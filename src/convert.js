@@ -34,6 +34,7 @@ export async function convert(ctx, dir) {
 
   const browser = await launch({ local: true });
   const results = [];
+  const extraAssets = {}; // url -> file in capture/assets, imported by push like captured images
   try {
     const page = await browser.newPage({ ignoreHTTPSErrors: true });
     await page.goto(`${siteUrl}wp-admin/?vip-dev-autologin=${key}`, { waitUntil: 'domcontentloaded' });
@@ -47,12 +48,20 @@ export async function convert(ctx, dir) {
         results.push(prev.sections.find((p) => p.id === s.id));
         continue;
       }
-      // A strip with no words and no images (decoration drawn in svg/CSS) becomes a sized, colored band.
+      const shot = path.join(ctx.dir, 'capture', 'sections', `${s.id}.png`);
+      // A strip with no words and no images (decoration drawn in CSS: dividers, patterns) becomes a picture
+      // of itself, one full-width image block the user can replace or delete.
       const html = !s.words && !s.images ? '' : fs.readFileSync(path.join(exDir, 'sections', `${s.id}.html`), 'utf8');
       const empty = !html;
+      let band = null;
+      if (empty && exists(shot)) {
+        const file = `band-${s.id}.png`;
+        fs.copyFileSync(shot, path.join(ctx.dir, 'capture', 'assets', file));
+        band = `https://c2t.invalid/band/${file}`;
+        extraAssets[band] = file;
+      }
       const aiHtml = html.replace(/ data-c2t-id="[^"]*"/g, ''); // ids are for layout lookups, not the model
-      const shot = path.join(ctx.dir, 'capture', 'sections', `${s.id}.png`);
-      const base = { html, bg: s.bg, height: s.height, width: sectionWidth(s), pad: !s.bg && exists(shot) ? padding(shot) : null, bgColor: s.bgColor, textColor: s.textColor, linkColor: s.linkColor, role: s.role,
+      const base = { html, band, bg: s.bg, height: s.height, width: sectionWidth(s), pad: !s.bg && exists(shot) ? padding(shot) : null, bgColor: s.bgColor, textColor: s.textColor, linkColor: s.linkColor, role: s.role,
         layout: dom.layout?.[s.id] || {}, els: dom.elements?.[s.id] || [], fonts: tokens.fonts, sizes: tokens.fontSizes };
       let out = await page.evaluate(toBlocks, base);
       const plainUnclear = !empty && (out.total ? out.unclear / out.total : 1) > 0.5;
@@ -104,6 +113,7 @@ export async function convert(ctx, dir) {
     await browser.close();
   }
   b.save();
+  write(path.join(dir, 'assets.json'), extraAssets);
   return {
     converter: siteUrl,
     sections: results,
@@ -178,8 +188,9 @@ function fidelity(html, markup) {
 }
 
 // Runs in the block editor page.
-function toBlocks({ html, bg, height, width, pad, bgColor, textColor, linkColor, role, aiMarkup, layout = {}, els = [], fonts = [], sizes = [] }) {
+function toBlocks({ html, band, bg, height, width, pad, bgColor: sectionBg, textColor, linkColor, role, aiMarkup, layout = {}, els = [], fonts = [], sizes = [] }) {
   const { rawHandler, createBlock, serialize, parse, getBlockType } = wp.blocks;
+  let bgColor = sectionBg; // may become a covering child's background (see below)
 
   const BLOCK = /^(H[1-6]|P|UL|OL|TABLE|BLOCKQUOTE|PRE|FIGURE|HR|IMG)$/;
   const INLINE = /^(A|SPAN|STRONG|EM|B|I|SMALL|BR|SUP|SUB|CODE|MARK|U|S|TIME|ABBR|LABEL)$/;
@@ -205,9 +216,9 @@ function toBlocks({ html, bg, height, width, pad, bgColor, textColor, linkColor,
     for (const n of [...node.childNodes]) {
       if (n.nodeType === 3) { if (n.textContent.trim()) run.push(n); continue; }
       if (n.nodeType !== 1) continue;
-      if (n.tagName === 'C2T-SEARCH') { flush(); out.push(...blocksOf(n)); }
+      if (n.tagName === 'C2T-SEARCH' || linkedImage(n) || gridLink(n)) { flush(); out.push(...blocksOf(n)); }
       else if (BLOCK.test(n.tagName) && !rowList(n)) { flush(); out.push(...blocksOf(n)); }
-      else if (INLINE.test(n.tagName) && !n.querySelector(HAS_BLOCK)) {
+      else if (INLINE.test(n.tagName) && !n.querySelector(HAS_BLOCK) && !linkedImage(n) && !gridLink(n)) {
         // Inline in the HTML but drawn on its own line (display:block in CSS): start a new paragraph.
         const b = L(n), last = [...run].reverse().find((r) => L(r));
         if (b && (b.bw || b.bg)) { flush(); out.push(...blocksOf(n)); continue; }
@@ -219,12 +230,62 @@ function toBlocks({ html, bg, height, width, pad, bgColor, textColor, linkColor,
     return out;
   }
   function rowList(n) {
-    if (!/^(UL|OL)$/.test(n.tagName) || L(n)?.d !== 'flex' && L(n)?.d !== 'grid') return false;
+    if (!/^(UL|OL)$/.test(n.tagName)) return false;
+    // Items that are themselves rows (a link laid out as name | description | arrow) make it a stack of rows.
+    if (L(n)?.d !== 'flex' && L(n)?.d !== 'grid') return [...n.children].some((li) => [...li.children].some((k) => gridLink(k)));
     const menu = [...n.children].every((li) => li.children.length === 1 && li.firstElementChild.tagName === 'A' && li.textContent.trim() === li.firstElementChild.textContent.trim()
       && !L(li.firstElementChild)?.bw && !L(li.firstElementChild)?.bg); // framed links are buttons
     return !(menu && (role === 'header' || role === 'footer'));
   }
+  // A list drawn in several columns (CSS columns or a grid of items) becomes columns of lists.
+  function columnList(n) {
+    if (!/^(UL|OL)$/.test(n.tagName)) return null;
+    const items = [...n.children].filter((li) => L(li));
+    if (items.length < 4) return null;
+    const xs = [];
+    for (const li of items) { const x = L(li).x; if (!xs.some((v) => Math.abs(v - x) <= 8)) xs.push(x); }
+    if (xs.length < 2 || xs.length > 6) return null;
+    xs.sort((a, b) => a - b);
+    const cols = xs.map((x) => items.filter((li) => Math.abs(L(li).x - x) <= 8));
+    // Columns hold several items each, stacked; otherwise it's a row, not columns.
+    if (cols.some((c) => c.length < 2)) return null;
+    return createBlock('core/columns', {}, cols.map((c) => {
+      const ul = document.createElement(n.tagName);
+      c.forEach((li) => ul.append(li.cloneNode(true)));
+      const list = blocksOf(ul);
+      list.forEach((b) => { b.c2tVertical = true; });
+      return createBlock('core/column', {}, list);
+    }));
+  }
+  // A link around just an image (a logo) is one linked image block.
+  function linkedImage(n) {
+    return n.tagName === 'A' && !n.textContent.trim() && n.querySelectorAll('img').length === 1 && !n.querySelector(HAS_BLOCK) ? n.querySelector('img') : null;
+  }
+  // A link laid out as a grid or flex row (a product row, a table row): the row stays a row; the link
+  // moves onto its first piece of text.
+  function gridLink(n) {
+    if (n.tagName !== 'A' || !/flex|grid/.test(L(n)?.d || '')) return false;
+    const kids = [...n.children].filter((k) => L(k));
+    return kids.length > 1 && linesOf(kids).some((l) => l.length > 1);
+  }
   function blocksOf(n) {
+    const img = linkedImage(n);
+    if (img) {
+      const w = Number(img.getAttribute('width')) || 0;
+      return [createBlock('core/image', { url: img.getAttribute('src'), alt: img.getAttribute('alt') || '', href: n.getAttribute('href'), linkDestination: 'custom', ...(n.getAttribute('target') === '_blank' ? { linkTarget: '_blank' } : {}), ...(w && w < 1000 ? { width: px(w) } : {}) })];
+    }
+    if (gridLink(n)) {
+      const d = n.cloneNode(true);
+      const href = n.getAttribute('href');
+      const div = document.createElement('div');
+      for (const at of n.attributes) if (at.name !== 'href' && at.name !== 'target') div.setAttribute(at.name, at.value);
+      div.append(...d.childNodes);
+      const first = [...div.querySelectorAll('*')].find((x) => x.childNodes.length && [...x.childNodes].some((c) => c.nodeType === 3 && c.textContent.trim()));
+      if (first && href) { const a = document.createElement('a'); a.setAttribute('href', href); a.append(...first.childNodes); first.append(a); }
+      return container(div);
+    }
+    const cl = columnList(n);
+    if (cl) return [cl];
     if (n.tagName === 'C2T-SEARCH') {
       return [createBlock('core/search', { label: n.getAttribute('data-label') || 'Search', showLabel: false, placeholder: n.getAttribute('data-placeholder') || '', buttonText: n.getAttribute('data-button') || 'Search' })];
     }
@@ -232,7 +293,13 @@ function toBlocks({ html, bg, height, width, pad, bgColor, textColor, linkColor,
     if (BLOCK.test(n.tagName)) {
       const c = n.cloneNode(true);
       c.querySelectorAll('div,section,article,header,footer,nav,aside').forEach((d) => d.replaceWith(...d.childNodes));
-      return leaf(c.outerHTML);
+      const out = leaf(c.outerHTML);
+      // Bulletless lists use the theme's "No bullets" list style (switchable in the block's Styles panel).
+      if (L(n)?.plain) out.forEach((b) => { if (b.name === 'core/list') b.attributes.className = [b.attributes.className, 'is-style-plain'].filter(Boolean).join(' '); });
+      // A list whose items were stacked top to bottom stays a vertical list (no horizontal menu row).
+      const items = [...n.children].filter((li) => L(li));
+      if (/^(UL|OL)$/.test(n.tagName) && items.length > 1 && items.every((li, i) => !i || L(li).y >= L(items[i - 1]).y + L(items[i - 1]).h - 2)) out.forEach((b) => { b.c2tVertical = true; });
+      return out;
     }
     if (INLINE.test(n.tagName) && !n.querySelector(HAS_BLOCK)) {
       const p = document.createElement('p');
@@ -250,7 +317,7 @@ function toBlocks({ html, bg, height, width, pad, bgColor, textColor, linkColor,
     const lines = !hasText && boxed ? linesOf(flow) : null;
     // Absolutely positioned children with content (badges, overlays) still keep their content, after the rows.
     const inner = lines && lines.some((l) => l.length > 1)
-      ? [...lines.flatMap((line) => (line.length < 2 ? blocksOf(line[0]) : inlineRun(line) ? leafRun(line) : rowBlock(n, line))), ...kids.filter((k) => L(k)?.abs).flatMap(blocksOf)]
+      ? [...lines.flatMap((line) => (line.length < 2 ? blocksOf(line[0]) : inlineRun(line) && !/flex|grid/.test(L(n)?.d || '') ? leafRun(line) : rowBlock(n, line))), ...kids.filter((k) => L(k)?.abs).flatMap(blocksOf)]
       : build(n);
     return frame(n, inner);
   }
@@ -325,13 +392,18 @@ function toBlocks({ html, bg, height, width, pad, bgColor, textColor, linkColor,
     for (let p = n.parentElement; p && !behind; p = p.parentElement) behind = L(p)?.bg || null;
     behind = behind || bgColor;
     const ownBg = f.bg && solid(f.bg) !== solid(behind) ? solid(f.bg) : null;
-    if (!f.bw && !ownBg) return inner;
+    if (!f.bw && !ownBg && !f.lines) return inner;
     const style = {
       ...(ownBg ? { color: { background: ownBg } } : {}),
-      ...(f.bw || f.br ? { border: { ...(f.bw ? { width: px(f.bw), color: solid(f.bc) || undefined, style: 'solid' } : {}), ...(f.br ? { radius: px(f.br) } : {}) } } : {}),
+      ...(f.bw || f.br || f.lines ? { border: {
+        ...(f.bw ? { width: px(f.bw), color: solid(f.bc) || undefined, style: 'solid' } : {}),
+        // One-sided rules (a line under a list row) stay one-sided, not a box.
+        ...Object.fromEntries(Object.entries(f.lines || {}).map(([k, v]) => [k, { width: px(v.w), color: solid(v.c) || undefined, style: 'solid' }])),
+        ...(f.br ? { radius: px(f.br) } : {}) } } : {}),
       ...(f.pad ? { spacing: { padding: { top: px(f.pad[0]), right: px(f.pad[1]), bottom: px(f.pad[2]), left: px(f.pad[3]) } } } : {}),
     };
-    const framed = createBlock('core/group', { style, layout: { type: 'default' } }, inner);
+    // A box spanning the page (a header band) spans it in the clone too.
+    const framed = createBlock('core/group', { style, layout: { type: 'default' }, ...(f.w >= 1368 ? { align: 'full' } : {}) }, inner);
     // Narrower than its parent (a card beside a cleaned-away icon): keep its width and which side it sits on.
     let pb = null;
     for (let p = n.parentElement; p && !pb; p = p.parentElement) pb = L(p);
@@ -341,7 +413,10 @@ function toBlocks({ html, bg, height, width, pad, bgColor, textColor, linkColor,
     return [createBlock('core/group', { layout: { type: 'constrained', contentSize: px(f.w), justifyContent: side } }, [framed])];
   }
 
-  let inner = html ? container(doc.body) : [];
+  // A box covering the whole section (a header band) is the section's background.
+  const top = [...doc.body.children].filter((c) => L(c));
+  if (top.length === 1 && L(top[0]).w >= 1368 && L(top[0]).bg && height && L(top[0]).h >= height * 0.8) bgColor = L(top[0]).bg;
+  let inner = html ? container(doc.body) : band ? [createBlock('core/image', { url: band, alt: '', align: 'full', sizeSlug: 'full' })] : [];
   if (aiMarkup) {
     // Rebuild from parsed names + attributes so small markup slips from the model can't leave invalid blocks.
     const unknown = new Set();
@@ -375,7 +450,7 @@ function toBlocks({ html, bg, height, width, pad, bgColor, textColor, linkColor,
   walk(inner);
   if (!inner.length) inner = [createBlock('core/paragraph', { content: '' })];
 
-  const block = bg
+  const block = bg && !band // a band picture already shows its background
     ? createBlock('core/cover', { url: bg, dimRatio: 40, align: 'full', minHeight: height ? Math.min(height, 1200) : 420, minHeightUnit: 'px', layout: { type: 'constrained', ...(width ? { contentSize: `${width}px` } : {}) } }, inner)
     : createBlock('core/group', {
         tagName: role === 'header' ? 'header' : role === 'footer' ? 'footer' : 'section',
@@ -383,8 +458,8 @@ function toBlocks({ html, bg, height, width, pad, bgColor, textColor, linkColor,
         layout: { type: 'constrained', ...(width ? { contentSize: `${width}px` } : {}) },
         style: {
           // Never shorter than the original section.
-          ...(height ? { dimensions: { minHeight: `${Math.min(height, 1200)}px` } } : {}),
-          spacing: { padding: pad ? { top: `${pad.top}px`, bottom: `${pad.bottom}px` } : { top: 'var:preset|spacing|50', bottom: 'var:preset|spacing|50' } },
+          ...(height && !band ? { dimensions: { minHeight: `${Math.min(height, 1200)}px` } } : {}),
+          spacing: { padding: band ? { top: '0px', bottom: '0px' } : pad ? { top: `${pad.top}px`, bottom: `${pad.bottom}px` } : { top: 'var:preset|spacing|50', bottom: 'var:preset|spacing|50' } },
           // The original's own text and link colors, so dark sections don't inherit the theme's dark text.
           ...(solid(bgColor) || solid(textColor) ? { color: { ...(solid(bgColor) ? { background: solid(bgColor) } : {}), ...(solid(textColor) ? { text: solid(textColor) } : {}) } } : {}),
           ...(solid(linkColor) ? { elements: { link: { color: { text: solid(linkColor) } } } } : {}),
@@ -396,7 +471,7 @@ function toBlocks({ html, bg, height, width, pad, bgColor, textColor, linkColor,
   // a plain stack sits on one row; in the footer a menu shares a row with the short text next to it.
   function rows(list) {
     const nav = (b) => {
-      if (b.name !== 'core/list') return { ...b, innerBlocks: (b.innerBlocks || []).map(nav) };
+      if (b.name !== 'core/list' || b.c2tVertical) { b.innerBlocks = (b.innerBlocks || []).map(nav); return b; }
       const links = b.innerBlocks.map((li) => !li.innerBlocks.length && String(li.attributes.content).trim().match(/^<a\s[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>$/));
       if (!links.length || !links.every(Boolean)) return b;
       return createBlock('core/navigation', { layout: { type: 'flex', flexWrap: 'wrap' }, overlayMenu: 'mobile' },
@@ -510,6 +585,9 @@ function toBlocks({ html, bg, height, width, pad, bgColor, textColor, linkColor,
       rowGap(b.innerBlocks || []);
       if (b.name !== 'core/navigation') return; // button gaps are frame to frame, set by the row
       const r = b.innerBlocks.map((c) => elOf.get(c)).filter(Boolean).sort((p, q) => p.x - q.x);
+      // Menu links take the color they had (navigation links have no color of their own).
+      const lc = solid(r[0]?.style?.color);
+      if (lc && lc !== sectionText) b.attributes.style = { ...(b.attributes.style || {}), color: { ...(b.attributes.style?.color || {}), text: lc } };
       const g = r.slice(1).map((e, i) => e.x - (r[i].x + r[i].w)).filter((v) => v >= 0);
       if (!g.length) return;
       const s2 = b.attributes.style || {};
