@@ -38,6 +38,7 @@ export async function convert(ctx, dir) {
     const page = await browser.newPage({ ignoreHTTPSErrors: true });
     await page.goto(`${siteUrl}wp-admin/?vip-dev-autologin=${key}`, { waitUntil: 'domcontentloaded' });
     await page.goto(`${siteUrl}wp-admin/post-new.php?post_type=page`, { waitUntil: 'domcontentloaded' });
+    if (/site not found/i.test(await page.title())) throw new Error('dev-env answered "Site not found": the database or object cache is down (docker ps -a | grep database; restart it, then restart memcached)');
     await page.waitForFunction(() => window.wp?.blocks?.rawHandler && wp.blocks.getBlockTypes().length > 40, null, { timeout: 60000 });
 
     fs.mkdirSync(path.join(dir, 'blocks'), { recursive: true });
@@ -209,7 +210,8 @@ function toBlocks({ html, bg, height, width, pad, bgColor, textColor, linkColor,
       else if (INLINE.test(n.tagName) && !n.querySelector(HAS_BLOCK)) {
         // Inline in the HTML but drawn on its own line (display:block in CSS): start a new paragraph.
         const b = L(n), last = [...run].reverse().find((r) => L(r));
-        if (b && last && b.y >= L(last).y + L(last).h - 2) flush();
+        if (b && (b.bw || b.bg)) { flush(); out.push(...blocksOf(n)); continue; }
+        if (b && last && (b.y >= L(last).y + L(last).h - 2 || L(last).bw || L(last).bg)) flush();
         run.push(n);
       } else { flush(); out.push(...container(n)); }
     }
@@ -248,10 +250,18 @@ function toBlocks({ html, bg, height, width, pad, bgColor, textColor, linkColor,
     const lines = !hasText && boxed ? linesOf(flow) : null;
     // Absolutely positioned children with content (badges, overlays) still keep their content, after the rows.
     const inner = lines && lines.some((l) => l.length > 1)
-      ? [...lines.flatMap((line) => (line.length > 1 ? rowBlock(n, line) : blocksOf(line[0]))), ...kids.filter((k) => L(k)?.abs).flatMap(blocksOf)]
+      ? [...lines.flatMap((line) => (line.length < 2 ? blocksOf(line[0]) : inlineRun(line) ? leafRun(line) : rowBlock(n, line))), ...kids.filter((k) => L(k)?.abs).flatMap(blocksOf)]
       : build(n);
     return frame(n, inner);
   }
+  // Plain inline text side by side ("650" + superscript "+") is one paragraph, not a row of columns.
+  // Framed inline elements (buttons) do make a row.
+  const inlineRun = (line) => line.every((k) => INLINE.test(k.tagName) && !k.querySelector(HAS_BLOCK) && !L(k)?.bw && !L(k)?.bg);
+  const leafRun = (line) => {
+    const p = document.createElement('p');
+    line.forEach((k) => p.append(k.cloneNode(true)));
+    return leaf(p.outerHTML);
+  };
   // Group children into visual lines: a child joins a line it overlaps vertically without overlapping
   // any item in it horizontally (DOM order can differ from drawing order). Items are then left to right.
   function linesOf(kids) {
@@ -301,8 +311,9 @@ function toBlocks({ html, bg, height, width, pad, bgColor, textColor, linkColor,
       items.map((x) => {
         if (!x.blocks.length) return createBlock('core/spacer', { width: px(x.b.w), height: '0px' });
         const item = x.blocks.length === 1 ? x.blocks[0] : createBlock('core/group', { layout: { type: 'default' } }, x.blocks);
-        // Small items keep their measured width so labels don't wrap; wide ones stay fluid for phones.
-        if (x.b.w <= 400) item.attributes.style = { ...(item.attributes.style || {}), layout: { selfStretch: 'fixed', flexSize: px(x.b.w + 2) } }; // +2: sub-pixel slack
+        // Images keep their measured width in a row; text sizes itself (a fixed box makes labels wrap
+        // whenever our font metrics differ by a pixel).
+        if (x.b.w <= 400 && item.name === 'core/image') item.attributes.style = { ...(item.attributes.style || {}), layout: { selfStretch: 'fixed', flexSize: px(x.b.w) } };
         return item;
       }))];
   }
@@ -468,7 +479,7 @@ function toBlocks({ html, bg, height, width, pad, bgColor, textColor, linkColor,
       if (fam) a.fontFamily = fam.slug;
       const style = { ...(a.style || {}), typography: JSON.parse(JSON.stringify(typo)) };
       const color = solid(st.color);
-      if (color && color !== sectionText) { style.color = { ...(style.color || {}), text: color }; delete a.textColor; }
+      if (color && (color !== sectionText || b.name === 'core/button')) { style.color = { ...(style.color || {}), text: color }; delete a.textColor; }
       if (b.name === 'core/button') {
         const f = e.frame || {};
         style.color = { ...(style.color || {}), background: f.bg ? solid(f.bg) : 'transparent' };

@@ -69,10 +69,13 @@ function cleanSections() {
       else img.remove();
     });
     // Buttons that are really links become links so they survive conversion.
+    // JS buttons keep their place and box (id) as links; drawn as boxes they become core/button.
     el.querySelectorAll('button').forEach((b) => {
-      const span = document.createElement('span');
-      span.textContent = b.textContent;
-      b.replaceWith(span);
+      const a = document.createElement('a');
+      a.setAttribute('href', '#');
+      a.textContent = b.textContent.trim();
+      if (b.getAttribute('data-c2t-id')) a.setAttribute('data-c2t-id', b.getAttribute('data-c2t-id'));
+      b.replaceWith(a);
     });
     [el, ...el.querySelectorAll('*')].forEach((n) => {
       [...n.attributes].forEach((a) => { if (!KEEP.has(a.name)) n.removeAttribute(a.name); });
