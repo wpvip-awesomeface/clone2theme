@@ -39,6 +39,7 @@ export function report(ctx) {
       elements: scores[x.id]?.dom ?? null, pixels: scores[x.id]?.pixelScore ?? null, gaps: scores[x.id]?.gaps || null, worst: scores[x.id]?.worst || [] })),
     scores: s.verify ? { page: s.verify.pageScore, avg: s.verify.avgScore, passing: s.verify.passing, of: s.verify.sections.length } : null,
     gaps: gapTotals(s.verify?.sections || []),
+    editability: s.verify?.editability || null,
     ai: s.convert?.ai ? { used: s.convert.ai.used, calls: s.convert.ai.calls, cached: s.convert.ai.cached, tokens: s.convert.ai.spent, cap: s.convert.ai.cap } : null,
     needsHuman,
   };
@@ -122,6 +123,7 @@ a{color:inherit}.meta{color:var(--mute);font-size:13px;margin:6px 0}code{font-si
 <p class="meta">fonts: ${fonts.map((f) => `${e(f.slug)} = ${e(f.name)}`).join(' · ')} · content width ${e(s.extract?.tokens?.contentSize)}</p>
 ${d.ai ? `<p class="meta">ai: ${d.ai.used.length ? `Haiku rebuilt ${d.ai.used.join(', ')}` : 'no sections rebuilt'} · ${d.ai.calls} calls, ${d.ai.cached} cached · ${d.ai.tokens.toLocaleString()} of ${d.ai.cap.toLocaleString()} tokens</p>` : ''}
 ${d.scores ? `<h2>match scores</h2><p class="meta">whole page ${pct(d.scores.page)} · section average ${pct(d.scores.avg)} · ${d.scores.passing} of ${d.scores.of} sections pass (≥85%). a section score is 60% elements (every text block and image found, in place, in the right style) and 40% pixels (backgrounds, borders, icons).</p>` : ''}
+${d.editability && !d.editability.error ? `<h2>editable in WordPress</h2><p class="meta">${d.editability.blocks} blocks · <b class="${d.editability.invalid ? 'bad' : 'good'}">${d.editability.invalid} invalid</b> · <b class="${d.editability.rawHtml ? 'bad' : 'good'}">${d.editability.rawHtml} raw HTML</b> · ${d.editability.linkedImages} of ${d.editability.images} images in the media library · ${d.editability.presetValues} styles from theme presets, ${d.editability.customValues} one-off values. (page content; header and footer are template parts)</p>` : ''}
 ${d.gaps && Object.keys(d.gaps).length ? `<h2>where the points go</h2>${gapBar(d.gaps)}<p class="meta">points lost per gap kind, averaged over sections. missing = not found in the clone; position = offset from where it sits next to its neighbor; size = box or image size; the rest are text styles.</p>` : ''}
 <h2>original vs local</h2><div class="compare"><figure><figcaption>original</figcaption>${s.capture ? '<img loading="lazy" src="capture/full.png" alt="original page">' : ''}</figure><figure><figcaption>local clone</figcaption>${local}</figure></div>
 <h2>sections</h2><div class="cards">${cards}</div>

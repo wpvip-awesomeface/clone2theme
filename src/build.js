@@ -1,7 +1,7 @@
 // Write a block theme from the starter: theme.json from tokens, parts and front page from blocks.
 import fs from 'node:fs';
 import path from 'node:path';
-import { ROOT, read, write } from './guard.js';
+import { ROOT, read, write, exists } from './guard.js';
 
 export async function build(ctx, dir) {
   const tokens = read(path.join(ctx.dir, 'extract', 'tokens.json'));
@@ -23,7 +23,16 @@ export async function build(ctx, dir) {
     fs.mkdirSync(path.join(themeDir, 'assets', 'fonts'), { recursive: true });
     fs.copyFileSync(path.join(ctx.dir, 'capture', 'assets', 'fonts', f.file), path.join(themeDir, 'assets', 'fonts', f.file));
   }
-  write(path.join(themeDir, 'theme.json'), themeJson(tokens));
+  // Tidy pass output: spacing and type scales, extra palette colors, patterns.
+  const presets = exists(path.join(ctx.dir, 'convert', 'presets.json')) ? read(path.join(ctx.dir, 'convert', 'presets.json')) : null;
+  write(path.join(themeDir, 'theme.json'), themeJson(tokens, presets));
+  const patterns = exists(path.join(ctx.dir, 'convert', 'patterns.json')) ? read(path.join(ctx.dir, 'convert', 'patterns.json')) : [];
+  fs.rmSync(path.join(themeDir, 'patterns'), { recursive: true, force: true });
+  if (patterns.length) fs.mkdirSync(path.join(themeDir, 'patterns'), { recursive: true });
+  for (const pt of patterns) {
+    const head = `<?php\n/**\n * Title: ${pt.title.replace(/\*\//g, '')}\n * Slug: ${themeSlug}/${pt.slug}\n * Categories: ${pt.category}\n */\n?>\n`;
+    fs.writeFileSync(path.join(themeDir, 'patterns', `${pt.slug}.php`), head + pt.markup.replace(/<\?/g, '&lt;?'));
+  }
 
   const blocksOf = (id) => fs.readFileSync(path.join(ctx.dir, 'convert', 'blocks', `${id}.html`), 'utf8');
   const byRole = (role) => conv.sections.filter((s) => s.role === role).map((s) => blocksOf(s.id));
@@ -36,7 +45,7 @@ export async function build(ctx, dir) {
   return { themeSlug, themeDir, fonts: fonts.length, header: header.length, footer: footer.length, body: conv.sections.length - header.length - footer.length };
 }
 
-function themeJson(t) {
+function themeJson(t, presets) {
   const color = (slug) => (t.palette.find((p) => p.slug === slug) ? `var:preset|color|${slug}` : undefined);
   const heading = t.fonts.find((f) => f.slug === 'heading') ? 'var:preset|font-family|heading' : 'var:preset|font-family|body';
   return {
@@ -46,7 +55,8 @@ function themeJson(t) {
       appearanceTools: true,
       useRootPaddingAwareAlignments: true,
       layout: { contentSize: t.contentSize, wideSize: `${Math.round(parseFloat(t.contentSize) * 1.2)}px` },
-      color: { palette: t.palette, defaultPalette: false },
+      color: { palette: [...t.palette, ...(presets?.extraColors || [])], defaultPalette: false },
+      ...(presets?.spacing?.length ? { spacing: { spacingSizes: presets.spacing } } : {}),
       typography: {
         fontFamilies: t.fonts.map((f) => {
           const faces = (t.fontFaces || []).filter((x) => x.slug === f.slug);
@@ -55,8 +65,9 @@ function themeJson(t) {
             fontFace: faces.map((x) => ({ fontFamily: x.family, fontWeight: x.weight, fontStyle: x.style, fontDisplay: 'swap', src: [`file:./assets/fonts/${x.file}`] })),
           } : f;
         }),
-        fontSizes: t.fontSizes.length ? t.fontSizes : undefined,
-        defaultFontSizes: !t.fontSizes.length,
+        // Token sizes stay (older blocks may use them); the tidy pass's measured scale comes after.
+        fontSizes: [...t.fontSizes, ...(presets?.fonts || [])].length ? [...t.fontSizes, ...(presets?.fonts || [])] : undefined,
+        defaultFontSizes: !t.fontSizes.length && !presets?.fonts?.length,
         // Sizes are exact at the 1440px capture width and shrink on phones (big headlines don't overflow).
         fluid: { maxViewportWidth: '1440px', minFontSize: '14px' },
       },

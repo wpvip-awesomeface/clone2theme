@@ -14,6 +14,7 @@ import { report } from '../src/report.js';
 import { CLOSE } from '../src/verify.js';
 import { guardAi } from '../src/convert.js';
 import { fitPass, keepBetter } from '../src/fit.js';
+import { tidyPass } from '../src/tidy.js';
 
 // Local secrets (ANTHROPIC_API_KEY) live in .env next to package.json; never committed.
 if (exists(path.join(ROOT, '.env'))) process.loadEnvFile(path.join(ROOT, '.env'));
@@ -32,7 +33,7 @@ const { values: o, positionals: [cmd, arg] } = parseArgs({
   allowPositionals: true,
   options: {
     site: { type: 'string' }, 'ai-budget': { type: 'string' }, run: { type: 'string' }, section: { type: 'string' }, until: { type: 'string' },
-    'no-ai': { type: 'boolean' }, 'keep-ai': { type: 'boolean' }, 'no-fit': { type: 'boolean' }, fresh: { type: 'boolean' }, only: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
+    'no-ai': { type: 'boolean' }, 'keep-ai': { type: 'boolean' }, 'no-fit': { type: 'boolean' }, 'no-tidy': { type: 'boolean' }, fresh: { type: 'boolean' }, only: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
   },
 });
 
@@ -72,6 +73,13 @@ async function pipeline(ctx, to = STEPS.length - 1) {
       await runSteps(ctx, to);
     }
     if (reverted.length === changed.length) break;
+  }
+  // Tidy last: presets instead of one-off values, palette colors, patterns; then rebuild the theme with them.
+  if (!process.exitCode && to === STEPS.length - 1 && !ctx.noTidy) {
+    const t = await tidyPass(ctx);
+    log('tidy', `${t.spacing} spacing steps, ${t.fonts} font sizes, ${t.colors} added colors, ${t.patterns} patterns`);
+    ctx.force = new Set(STEPS.slice(STEPS.indexOf('build')));
+    await runSteps(ctx, to);
   }
   const r = report(ctx);
   log('report', path.join(ctx.dir, 'report.html'));
@@ -116,6 +124,7 @@ try {
     const ctx = loadCtx(o.run);
     ctx.section = o.section;
     ctx.noFit = !!o['no-fit'];
+    ctx.noTidy = !!o['no-tidy'];
     ctx.keepAi = !!o['keep-ai']; // skip the score guard, to look at an AI version that lost
     ctx.force = new Set(o.only ? [arg] : STEPS.slice(i));
     await pipeline(ctx, o.only ? i : undefined);

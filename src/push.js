@@ -42,16 +42,35 @@ export async function push(ctx, dir) {
       if (hit) media[orig] = hit;
     }
   }
-  const rewrite = (html) => Object.entries(media).reduce((h, [orig, local]) => h.split(orig).join(local).split(esc(orig)).join(local), html);
+  // Media library ids, so image blocks are linked attachments (Replace opens the library, alt and sizes work).
+  let idByUrl = {};
+  try {
+    const rows = JSON.parse(env.wp(['post', 'list', '--post_type=attachment', '--fields=ID,guid', '--format=json', '--posts_per_page=-1'], { url }) || '[]');
+    idByUrl = Object.fromEntries(rows.map((r) => [String(r.guid).replace(/^https?:/, ''), r.ID]));
+  } catch { /* images stay linked by URL only */ }
+  const withIds = (html) => html.replace(/<!-- wp:image( \{[^\n]*?\})? -->([\s\S]*?)<!-- \/wp:image -->/g, (all, json, inner) => {
+    const src = inner.match(/<img[^>]*\ssrc="([^"]+)"/)?.[1];
+    const id = src && idByUrl[src.replace(/^https?:/, '')];
+    const attrs = json ? JSON.parse(json) : {};
+    if (!id || attrs.id) return all;
+    attrs.id = id;
+    const img = inner.replace(/<img([^>]*)>/, (tag, rest) => (/\sclass="/.test(rest) ? `<img${rest.replace(/\sclass="/, ` class="wp-image-${id} `)}>` : `<img class="wp-image-${id}"${rest}>`));
+    return `<!-- wp:image ${JSON.stringify(attrs)} -->${img}<!-- /wp:image -->`;
+  });
+  const rewrite = (html) => withIds(Object.entries(media).reduce((h, [orig, local]) => h.split(orig).join(local).split(esc(orig)).join(local), html));
 
   for (const part of ['header', 'footer']) {
     const f = path.join(target, 'parts', `${part}.html`);
-    fs.writeFileSync(f, rewrite(fs.readFileSync(f, 'utf8')));
+    if (exists(f)) fs.writeFileSync(f, rewrite(fs.readFileSync(f, 'utf8')));
   }
+  const patternsDir = path.join(target, 'patterns');
+  if (exists(patternsDir)) for (const f of fs.readdirSync(patternsDir)) fs.writeFileSync(path.join(patternsDir, f), rewrite(fs.readFileSync(path.join(patternsDir, f), 'utf8')));
   fs.writeFileSync(path.join(stage, 'front.html'), rewrite(fs.readFileSync(path.join(ctx.dir, 'build', 'front.html'), 'utf8')));
 
   env.wp(['theme', 'enable', b.themeSlug], { url });
   env.wp(['theme', 'activate', b.themeSlug], { url });
+  // WordPress caches a theme's pattern list; new pattern files only show after clearing it.
+  env.wp(['eval', 'if (method_exists(wp_get_theme(), "delete_pattern_cache")) wp_get_theme()->delete_pattern_cache();'], { url, allowFail: true });
 
   let pageId = prev.siteUrl === url ? prev.pageId : null;
   if (pageId) {

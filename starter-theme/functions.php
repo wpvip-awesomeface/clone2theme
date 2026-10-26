@@ -9,3 +9,12 @@ add_action(
 		wp_enqueue_style( 'c2t-style', get_stylesheet_uri(), array(), wp_get_theme()->get( 'Version' ) );
 	}
 );
+
+// Pattern categories for the sections and repeated items clone2theme found on the page.
+add_action(
+	'init',
+	function () {
+		register_block_pattern_category( 'c2t-sections', array( 'label' => __( 'Page sections', 'c2t' ) ) );
+		register_block_pattern_category( 'c2t-items', array( 'label' => __( 'Repeating items', 'c2t' ) ) );
+	}
+);

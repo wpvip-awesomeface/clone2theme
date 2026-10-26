@@ -6,6 +6,7 @@ import pixelmatch from 'pixelmatch';
 import { launch } from './browser.js';
 import { read, write } from './guard.js';
 import { collectElements, compareSection } from './elements.js';
+import { devenv } from './devenv.js';
 
 const DIFF_WIDTH = 320; // both sides are scaled to this width before diffing
 const COARSE_WIDTH = 48;
@@ -19,7 +20,7 @@ export async function verify(ctx, dir) {
   const { siteUrl } = read(path.join(ctx.dir, 'push', 'done.json'));
   const conv = read(path.join(ctx.dir, 'convert', 'done.json'));
   const browser = await launch({ local: true });
-  let status, height, broken, found, readable, localEls;
+  let status, height, broken, found, readable, localEls, edit;
   fs.mkdirSync(path.join(dir, 'sections'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'diff'), { recursive: true });
   try {
@@ -64,6 +65,7 @@ export async function verify(ctx, dir) {
     for (const id of found) {
       await page.locator(`[data-c2t-local="${id}"]`).screenshot({ path: path.join(dir, 'sections', `${id}.png`) }).catch(() => {});
     }
+    edit = await editability(browser, siteUrl, read(path.join(ctx.dir, 'push', 'state.json')).pageId, devenv(ctx.site).loginKey()).catch((e) => ({ error: e.message.slice(0, 200) }));
   } finally {
     await browser.close();
   }
@@ -100,11 +102,51 @@ export async function verify(ctx, dir) {
     pagePixels: page.score,
     avgScore: scored.length ? round(scored.reduce((a, s) => a + s.score, 0) / scored.length) : null,
     passing: scored.filter((s) => s.status === 'pass').length,
+    editability: edit,
     sections,
   };
 }
 
 const round = (n) => Math.round(n * 1000) / 1000;
+
+// How editable the page is in the real block editor: every block valid (no "unexpected content"),
+// no raw HTML blocks, images linked to the media library, styles from presets rather than one-off values.
+async function editability(browser, siteUrl, pageId, key) {
+  const page = await browser.newPage({ ignoreHTTPSErrors: true, viewport: { width: 1440, height: 900 } });
+  try {
+    await page.goto(`${siteUrl}wp-admin/?vip-dev-autologin=${key}`, { waitUntil: 'domcontentloaded' });
+    await page.goto(`${siteUrl}wp-admin/post.php?post=${pageId}&action=edit`, { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => window.wp?.data?.select('core/block-editor')?.getBlocks().length > 0, null, { timeout: 90000 });
+    return await page.evaluate(() => {
+      const all = [];
+      const walk = (l) => l.forEach((x) => { all.push(x); walk(x.innerBlocks); });
+      walk(wp.data.select('core/block-editor').getBlocks());
+      let custom = 0, preset = 0;
+      const scan = (v) => {
+        if (v && typeof v === 'object') return Object.values(v).forEach(scan);
+        if (typeof v !== 'string') return;
+        if (/^var:preset\|/.test(v)) preset++;
+        else if (/^-?\d+(\.\d+)?px$|^#[0-9a-f]{6}$/i.test(v) && !/^0px$/.test(v)) custom++;
+      };
+      for (const b of all) {
+        scan(b.attributes.style?.spacing); scan(b.attributes.style?.typography?.fontSize); scan(b.attributes.style?.color); scan(b.attributes.style?.border?.color);
+        for (const k of ['fontSize', 'textColor', 'backgroundColor', 'borderColor']) if (b.attributes[k]) preset++;
+      }
+      const images = all.filter((x) => x.name === 'core/image');
+      return {
+        blocks: all.length,
+        invalid: all.filter((x) => !x.isValid).length,
+        rawHtml: all.filter((x) => ['core/html', 'core/freeform', 'core/missing'].includes(x.name)).length,
+        images: images.length,
+        linkedImages: images.filter((x) => x.attributes.id).length,
+        presetValues: preset,
+        customValues: custom,
+      };
+    });
+  } finally {
+    await page.close();
+  }
+}
 const grade = (score) => (score >= PASS ? 'pass' : score >= CLOSE ? 'close' : 'fail');
 
 // Runs in the local page: per marked section, share of visible text characters with contrast >= 3:1
