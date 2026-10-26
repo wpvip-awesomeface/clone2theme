@@ -392,6 +392,15 @@ function toBlocks({ html, band, bg, height, width, pad, bgColor: sectionBg, text
     for (let p = n.parentElement; p && !behind; p = p.parentElement) behind = L(p)?.bg || null;
     behind = behind || bgColor;
     const ownBg = f.bg && solid(f.bg) !== solid(behind) ? solid(f.bg) : null;
+    // A box painted with a photo (a card, an inner band) becomes a cover holding its content.
+    if (f.img && f.img !== bg) {
+      // Light text on the photo means a dark cover (white text); otherwise a light one.
+      const inside = els.filter((e) => e.kind === 'text' && e.style?.color && e.x >= f.x && e.y >= f.y && e.x + e.w <= f.x + f.w + 2 && e.y + e.h <= f.y + f.h + 2);
+      const light = inside.filter((e) => { const [r, g, b2] = (e.style.color.match(/[\d.]+/g) || []).map(Number); return 0.299 * r + 0.587 * g + 0.114 * b2 > 160; }).length;
+      return [createBlock('core/cover', { url: f.img, dimRatio: 0, isDark: inside.length ? light * 2 >= inside.length : true, minHeight: f.h, minHeightUnit: 'px', contentPosition: 'top left',
+        ...(f.w >= 1368 ? { align: 'full' } : {}),
+        style: { ...(f.br ? { border: { radius: px(f.br) } } : {}), ...(f.pad ? { spacing: { padding: { top: px(f.pad[0]), right: px(f.pad[1]), bottom: px(f.pad[2]), left: px(f.pad[3]) } } } : {}) } }, inner)];
+    }
     if (!f.bw && !ownBg && !f.lines) return inner;
     const style = {
       ...(ownBg ? { color: { background: ownBg } } : {}),
@@ -523,6 +532,8 @@ function toBlocks({ html, band, bg, height, width, pad, bgColor: sectionBg, text
           if (els[k].frame?.br) b.attributes.style = { ...(b.attributes.style || {}), border: { ...(b.attributes.style?.border || {}), radius: px(els[k].frame.br) } };
           // Shown cropped (overflow or object-fit cover): same visible box, image fills it.
           if (els[k].cropped || els[k].fit === 'cover') Object.assign(b.attributes, { width: px(els[k].w), height: px(els[k].h), scale: 'cover', aspectRatio: undefined });
+          // object-fit contain: the box is fixed and the image is letterboxed inside it (a logo in a 362×32 slot).
+          else if (els[k].fit === 'contain') Object.assign(b.attributes, { width: px(els[k].w), height: px(els[k].h), scale: 'contain', aspectRatio: undefined });
         }
         return b;
       }

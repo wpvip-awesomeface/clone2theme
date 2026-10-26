@@ -132,9 +132,11 @@ function analyze() {
   // A page built inside one wrapper would otherwise be one 8000px section: split tall candidates that
   // are a stack of full-width bands into those bands (columns side by side are never split).
   const W = (el) => el.getBoundingClientRect().width;
-  const stacked = (kids) => kids.every((k, i) => !i || kids[i - 1].getBoundingClientRect().bottom - 2 <= k.getBoundingClientRect().top);
+  // Bands may overlap a little (negative margins pulling a band up over the previous one).
+  const stacked = (kids) => kids.every((k, i) => !i || kids[i - 1].getBoundingClientRect().bottom - Math.max(2, Math.min(80, H(k) * 0.1)) <= k.getBoundingClientRect().top);
+  // Theme wrappers nest deep (GeneratePress: page > content > primary > main > article > inside > entry-content).
   const split = (c, depth = 0) => {
-    if (depth > 5 || H(c) < innerHeight * 1.5) return [c];
+    if (depth > 12 || H(c) < innerHeight * 1.5) return [c];
     const kids = [...c.children].filter((k) => !SKIP.has(k.tagName) && visible(k) && H(k) >= 40);
     // Only page bands count: children as wide as the viewport. Rows inside a content column (a timeline,
     // a card list) stay together in their section.
@@ -224,6 +226,14 @@ function analyze() {
       const closed = n.parentElement?.closest('details:not([open])') && !n.closest('summary');
       if ((closed || !visible(n)) && !['BR', 'SOURCE'].includes(n.tagName)) n.setAttribute('data-c2t-hidden', '1');
       if (n.tagName === 'A' && n.href) n.setAttribute('href', n.href);
+      // Boxes painted with a photo (cards, bands inside a section): keep the photo as the box's background.
+      const bi = getComputedStyle(n).backgroundImage.match(/url\(["']?(.*?)["']?\)/)?.[1];
+      const br = n.getBoundingClientRect();
+      if (bi && !bi.startsWith('data:') && !/\.svg(\?|$)/i.test(bi) && br.width >= 120 && br.height >= 120 && visible(n)) {
+        const abs = new URL(bi, location.href).href;
+        n.setAttribute('data-c2t-bgimg', abs);
+        assetUrls.add(abs);
+      }
       if (n.tagName === 'IMG') {
         const src = n.currentSrc || n.src || n.dataset.src || n.dataset.lazySrc || '';
         if (src && !src.startsWith('data:')) {

@@ -30,7 +30,7 @@ export function report(ctx) {
   const failing = (s.verify?.sections || []).filter((v) => v.status === 'fail');
   if (failing.length) needsHuman.push({ why: `${failing.length} of ${s.verify.sections.length} sections look different (below ${Math.round(CLOSE * 100)}% match): ${failing.map((v) => v.id).join(', ')}` });
   if (s.verify?.mobile?.overflow) needsHuman.push({ why: `the clone scrolls sideways on a phone (${s.verify.mobile.width}px wide at 390px): ${s.verify.mobile.wide.join(', ')}` });
-  if (s.verify?.editability?.invalid) needsHuman.push({ why: `${s.verify.editability.invalid} blocks show "unexpected content" in the editor` });
+  if (s.verify?.editability?.invalid) needsHuman.push({ why: `${s.verify.editability.invalid} blocks show "unexpected content" in the editor${s.verify.editability.invalidNames?.length ? ` (${s.verify.editability.invalidNames.join(", ")})` : ""}` });
   if (s.verify && s.verify.status !== 200) needsHuman.push({ why: `local page returned HTTP ${s.verify.status}` });
 
   const data = {

@@ -162,6 +162,7 @@ async function editability(browser, siteUrl, pageId, key) {
       return {
         blocks: all.length,
         invalid: all.filter((x) => !x.isValid).length,
+        invalidNames: [...new Set(all.filter((x) => !x.isValid).map((x) => x.name))],
         rawHtml: all.filter((x) => ['core/html', 'core/freeform', 'core/missing'].includes(x.name)).length,
         images: images.length,
         linkedImages: images.filter((x) => x.attributes.id).length,

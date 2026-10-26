@@ -34,7 +34,7 @@ export async function extract(ctx, dir) {
 
 // Runs in a JS-disabled copy of the captured DOM.
 function cleanSections() {
-  const KEEP = new Set(['href', 'src', 'alt', 'width', 'colspan', 'rowspan', 'title', 'target', 'data-c2t-id', 'data-label', 'data-placeholder', 'data-button']);
+  const KEEP = new Set(['href', 'src', 'alt', 'width', 'colspan', 'rowspan', 'title', 'target', 'data-c2t-id', 'data-label', 'data-placeholder', 'data-button', 'data-c2t-bgimg']);
   const DROP = 'script,style,noscript,link,meta,template,svg,iframe,form,input,select,textarea,button:empty,[data-c2t-hidden]';
   const out = {};
   document.querySelectorAll('[data-c2t-section]').forEach((sec) => {
@@ -80,6 +80,8 @@ function cleanSections() {
       return d;
     };
     el.querySelectorAll('cite, q, dfn').forEach((n) => swap(n, 'span'));
+    // A gallery (a figure holding figures or several images) converts as its first image only: unwrap it.
+    el.querySelectorAll('figure').forEach((f) => { if (f.parentNode && (f.querySelector('figure') || f.querySelectorAll('img').length > 1)) swap(f, 'div'); });
     el.querySelectorAll('dl').forEach((n) => swap(n, 'div'));
     el.querySelectorAll('dt, dd').forEach((n) => swap(n, 'p'));
     // A link wrapped around a whole card: the card stays blocks, the link moves onto its first line of text.

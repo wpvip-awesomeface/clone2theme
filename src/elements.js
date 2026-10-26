@@ -144,6 +144,7 @@ export function collectLayout(attr) {
       const e = { x: Math.round(r.left - base.left), y: Math.round(r.top - base.top), w: Math.round(r.width), h: Math.round(r.height) };
       if (cs.position === 'absolute' || cs.position === 'fixed') e.abs = true; // overlays/decoration, not part of the flow
       if (/^(UL|OL)$/.test(el.tagName) && cs.listStyleType === 'none') e.plain = true; // no bullets
+      if (el.hasAttribute('data-c2t-bgimg')) e.img = el.getAttribute('data-c2t-bgimg');
       if (/flex|grid/.test(cs.display)) {
         e.d = cs.display.includes('grid') ? 'grid' : 'flex';
         e.dir = cs.flexDirection;

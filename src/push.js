@@ -5,6 +5,8 @@ import { devenv } from './devenv.js';
 import { read, write, exists } from './guard.js';
 
 const esc = (s) => s.replace(/&/g, '&amp;');
+// Block comment attributes are JSON, where serialize() writes & < > as \u0026 \u003c \u003e.
+const jsonEsc = (s) => s.replace(/&/g, '\\u0026').replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
 
 export async function push(ctx, dir) {
   const env = devenv(ctx.site);
@@ -60,7 +62,7 @@ export async function push(ctx, dir) {
     const img = inner.replace(/<img([^>]*)>/, (tag, rest) => (/\sclass="/.test(rest) ? `<img${rest.replace(/\sclass="/, ` class="wp-image-${id} `)}>` : `<img class="wp-image-${id}"${rest}>`));
     return `<!-- wp:image ${JSON.stringify(attrs)} -->${img}<!-- /wp:image -->`;
   });
-  const rewrite = (html) => withIds(Object.entries(media).reduce((h, [orig, local]) => h.split(orig).join(local).split(esc(orig)).join(local), html));
+  const rewrite = (html) => withIds(Object.entries(media).reduce((h, [orig, local]) => h.split(orig).join(local).split(esc(orig)).join(local).split(jsonEsc(orig)).join(local), html));
 
   for (const part of ['header', 'footer']) {
     const f = path.join(target, 'parts', `${part}.html`);
