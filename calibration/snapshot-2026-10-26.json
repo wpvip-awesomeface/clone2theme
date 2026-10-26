@@ -1,0 +1,725 @@
+[
+ {
+  "key": "dentalcorp-ca-01",
+  "run": "dentalcorp-ca",
+  "id": "01",
+  "score": 0.664,
+  "dom": 0.772,
+  "pixels": 0.503,
+  "heightRatio": 1.236,
+  "readable": 1,
+  "gaps": {
+   "position": 0.206,
+   "size": 0.01,
+   "font-size": 0.013
+  },
+  "cropped": false
+ },
+ {
+  "key": "dentalcorp-ca-02",
+  "run": "dentalcorp-ca",
+  "id": "02",
+  "score": 0.883,
+  "dom": 0.985,
+  "pixels": 0.729,
+  "heightRatio": 1.14,
+  "readable": 1,
+  "gaps": {
+   "position": 0.015
+  },
+  "cropped": false
+ },
+ {
+  "key": "dentalcorp-ca-03",
+  "run": "dentalcorp-ca",
+  "id": "03",
+  "score": 0.827,
+  "dom": 0.956,
+  "pixels": 0.633,
+  "heightRatio": 1.081,
+  "readable": 1,
+  "gaps": {
+   "position": 0.044
+  },
+  "cropped": false
+ },
+ {
+  "key": "dentalcorp-ca-04",
+  "run": "dentalcorp-ca",
+  "id": "04",
+  "score": 0.63,
+  "dom": 0.753,
+  "pixels": 0.445,
+  "heightRatio": 1.167,
+  "readable": 1,
+  "gaps": {
+   "position": 0.183,
+   "size": 0.064
+  },
+  "cropped": false
+ },
+ {
+  "key": "dentalcorp-ca-05",
+  "run": "dentalcorp-ca",
+  "id": "05",
+  "score": 0.846,
+  "dom": 0.961,
+  "pixels": 0.673,
+  "heightRatio": 1.025,
+  "readable": 1,
+  "gaps": {
+   "position": 0.039
+  },
+  "cropped": false
+ },
+ {
+  "key": "dentalcorp-ca-06",
+  "run": "dentalcorp-ca",
+  "id": "06",
+  "score": 0.838,
+  "dom": 0.9,
+  "pixels": 0.746,
+  "heightRatio": 1.015,
+  "readable": 1,
+  "gaps": {
+   "position": 0.078,
+   "size": 0.019
+  },
+  "cropped": false
+ },
+ {
+  "key": "dentalcorp-ca-07",
+  "run": "dentalcorp-ca",
+  "id": "07",
+  "score": 0.869,
+  "dom": 0.968,
+  "pixels": 0.721,
+  "heightRatio": 1.03,
+  "readable": 1,
+  "gaps": {
+   "position": 0.026,
+   "size": 0.005
+  },
+  "cropped": false
+ },
+ {
+  "key": "dentalcorp-ca-08",
+  "run": "dentalcorp-ca",
+  "id": "08",
+  "score": 0.773,
+  "dom": 0.846,
+  "pixels": 0.663,
+  "heightRatio": 0.969,
+  "readable": 1,
+  "gaps": {
+   "position": 0.128,
+   "size": 0.019,
+   "font-size": 0.007
+  },
+  "cropped": true
+ },
+ {
+  "key": "dentalcorp-ca-09",
+  "run": "dentalcorp-ca",
+  "id": "09",
+  "score": 0.699,
+  "dom": 0.981,
+  "pixels": 0.275,
+  "heightRatio": 1.009,
+  "readable": 1,
+  "gaps": {
+   "position": 0.018
+  },
+  "cropped": false
+ },
+ {
+  "key": "dentalcorp-ca-10",
+  "run": "dentalcorp-ca",
+  "id": "10",
+  "score": 0.605,
+  "dom": 0.849,
+  "pixels": 0.24,
+  "heightRatio": 1.083,
+  "readable": 1,
+  "gaps": {
+   "position": 0.127,
+   "size": 0.011,
+   "font-size": 0.012
+  },
+  "cropped": false
+ },
+ {
+  "key": "basecamp-com-01",
+  "run": "basecamp-com",
+  "id": "01",
+  "score": 0.383,
+  "dom": 0.638,
+  "pixels": 0,
+  "heightRatio": 6.339,
+  "readable": 1,
+  "gaps": {
+   "position": 0.35,
+   "size": 0.012
+  },
+  "cropped": false
+ },
+ {
+  "key": "basecamp-com-02",
+  "run": "basecamp-com",
+  "id": "02",
+  "score": 0.153,
+  "dom": null,
+  "pixels": 0.153,
+  "heightRatio": 1.264,
+  "readable": 1,
+  "gaps": {},
+  "cropped": false
+ },
+ {
+  "key": "basecamp-com-03",
+  "run": "basecamp-com",
+  "id": "03",
+  "score": 0.329,
+  "dom": 0.508,
+  "pixels": 0.07,
+  "heightRatio": 11.175,
+  "readable": 0.988,
+  "gaps": {
+   "missing": 0.006,
+   "position": 0.302,
+   "size": 0.143,
+   "font-size": 0.014,
+   "weight": 0.018,
+   "color": 0.008
+  },
+  "cropped": true
+ },
+ {
+  "key": "basecamp-com-04",
+  "run": "basecamp-com",
+  "id": "04",
+  "score": 0.508,
+  "dom": 0.621,
+  "pixels": 0.339,
+  "heightRatio": 0.991,
+  "readable": 1,
+  "gaps": {
+   "position": 0.337,
+   "size": 0.042
+  },
+  "cropped": false
+ },
+ {
+  "key": "basecamp-com-05",
+  "run": "basecamp-com",
+  "id": "05",
+  "score": 0.466,
+  "dom": 0.61,
+  "pixels": 0.251,
+  "heightRatio": 1.096,
+  "readable": 1,
+  "gaps": {
+   "position": 0.37,
+   "size": 0.021
+  },
+  "cropped": false
+ },
+ {
+  "key": "basecamp-com-06",
+  "run": "basecamp-com",
+  "id": "06",
+  "score": 0.156,
+  "dom": null,
+  "pixels": 0.156,
+  "heightRatio": 2.011,
+  "readable": 1,
+  "gaps": {},
+  "cropped": false
+ },
+ {
+  "key": "basecamp-com-07",
+  "run": "basecamp-com",
+  "id": "07",
+  "score": 0.452,
+  "dom": 0.625,
+  "pixels": 0.193,
+  "heightRatio": 1.402,
+  "readable": 1,
+  "gaps": {
+   "position": 0.273,
+   "size": 0.054,
+   "font-size": 0.012,
+   "weight": 0.018,
+   "color": 0.018
+  },
+  "cropped": false
+ },
+ {
+  "key": "basecamp-com-08",
+  "run": "basecamp-com",
+  "id": "08",
+  "score": 0.16,
+  "dom": null,
+  "pixels": 0.16,
+  "heightRatio": 2.011,
+  "readable": 1,
+  "gaps": {},
+  "cropped": false
+ },
+ {
+  "key": "basecamp-com-09",
+  "run": "basecamp-com",
+  "id": "09",
+  "score": 0.483,
+  "dom": 0.741,
+  "pixels": 0.095,
+  "heightRatio": 1.133,
+  "readable": 1,
+  "gaps": {
+   "position": 0.247,
+   "size": 0.012
+  },
+  "cropped": false
+ },
+ {
+  "key": "basecamp-com-10",
+  "run": "basecamp-com",
+  "id": "10",
+  "score": 0.151,
+  "dom": null,
+  "pixels": 0.151,
+  "heightRatio": 2.011,
+  "readable": 1,
+  "gaps": {},
+  "cropped": false
+ },
+ {
+  "key": "basecamp-com-11",
+  "run": "basecamp-com",
+  "id": "11",
+  "score": 0.391,
+  "dom": 0.529,
+  "pixels": 0.185,
+  "heightRatio": 0.234,
+  "readable": 1,
+  "gaps": {
+   "position": 0.35,
+   "size": 0.121
+  },
+  "cropped": false
+ },
+ {
+  "key": "basecamp-com-12",
+  "run": "basecamp-com",
+  "id": "12",
+  "score": 0.475,
+  "dom": 0.652,
+  "pixels": 0.255,
+  "heightRatio": 0.909,
+  "readable": 0.964,
+  "gaps": {
+   "position": 0.28,
+   "size": 0.018,
+   "weight": 0.046
+  },
+  "cropped": false
+ },
+ {
+  "key": "basecamp-com-13",
+  "run": "basecamp-com",
+  "id": "13",
+  "score": 0.132,
+  "dom": null,
+  "pixels": 0.132,
+  "heightRatio": 2.011,
+  "readable": 1,
+  "gaps": {},
+  "cropped": false
+ },
+ {
+  "key": "basecamp-com-14",
+  "run": "basecamp-com",
+  "id": "14",
+  "score": 0.521,
+  "dom": 0.729,
+  "pixels": 0.209,
+  "heightRatio": 1.284,
+  "readable": 1,
+  "gaps": {
+   "position": 0.252,
+   "size": 0.019
+  },
+  "cropped": false
+ },
+ {
+  "key": "basecamp-com-15",
+  "run": "basecamp-com",
+  "id": "15",
+  "score": 0.449,
+  "dom": 0.601,
+  "pixels": 0.221,
+  "heightRatio": 0.997,
+  "readable": 1,
+  "gaps": {
+   "position": 0.341,
+   "size": 0.058
+  },
+  "cropped": false
+ },
+ {
+  "key": "basecamp-com-16",
+  "run": "basecamp-com",
+  "id": "16",
+  "score": 0.152,
+  "dom": null,
+  "pixels": 0.152,
+  "heightRatio": 2.011,
+  "readable": 1,
+  "gaps": {},
+  "cropped": false
+ },
+ {
+  "key": "basecamp-com-17",
+  "run": "basecamp-com",
+  "id": "17",
+  "score": 0.412,
+  "dom": 0.552,
+  "pixels": 0.202,
+  "heightRatio": 1.481,
+  "readable": 1,
+  "gaps": {
+   "position": 0.277,
+   "size": 0.083,
+   "font-size": 0.054,
+   "weight": 0.022,
+   "color": 0.006,
+   "case": 0.006
+  },
+  "cropped": false
+ },
+ {
+  "key": "basecamp-com-18",
+  "run": "basecamp-com",
+  "id": "18",
+  "score": 0.494,
+  "dom": null,
+  "pixels": 0.494,
+  "heightRatio": 1.024,
+  "readable": 1,
+  "gaps": {},
+  "cropped": false
+ },
+ {
+  "key": "basecamp-com-19",
+  "run": "basecamp-com",
+  "id": "19",
+  "score": 0.564,
+  "dom": 0.867,
+  "pixels": 0.122,
+  "heightRatio": 0.992,
+  "readable": 0.992,
+  "gaps": {
+   "position": 0.093,
+   "size": 0.028,
+   "color": 0.007
+  },
+  "cropped": false
+ },
+ {
+  "key": "basecamp-com-20",
+  "run": "basecamp-com",
+  "id": "20",
+  "score": 0,
+  "dom": null,
+  "pixels": 0,
+  "heightRatio": 2.422,
+  "readable": 1,
+  "gaps": {},
+  "cropped": false
+ },
+ {
+  "key": "gov-uk-01",
+  "run": "gov-uk",
+  "id": "01",
+  "score": 0.753,
+  "dom": 0.939,
+  "pixels": 0.473,
+  "heightRatio": 0.973,
+  "readable": 1,
+  "gaps": {
+   "position": 0.019,
+   "size": 0.042
+  },
+  "cropped": false
+ },
+ {
+  "key": "gov-uk-02",
+  "run": "gov-uk",
+  "id": "02",
+  "score": 0.389,
+  "dom": 0.564,
+  "pixels": 0.127,
+  "heightRatio": 1.046,
+  "readable": 1,
+  "gaps": {
+   "position": 0.35,
+   "size": 0.019,
+   "color": 0.067
+  },
+  "cropped": false
+ },
+ {
+  "key": "gov-uk-03",
+  "run": "gov-uk",
+  "id": "03",
+  "score": 0.625,
+  "dom": 0.829,
+  "pixels": 0.32,
+  "heightRatio": 0.88,
+  "readable": 1,
+  "gaps": {
+   "position": 0.107,
+   "size": 0.041,
+   "font-size": 0.006,
+   "weight": 0.006,
+   "font": 0.006,
+   "color": 0.006
+  },
+  "cropped": false
+ },
+ {
+  "key": "gov-uk-04",
+  "run": "gov-uk",
+  "id": "04",
+  "score": 0.616,
+  "dom": 0.738,
+  "pixels": 0.433,
+  "heightRatio": 1,
+  "readable": 1,
+  "gaps": {
+   "position": 0.218,
+   "size": 0.044
+  },
+  "cropped": false
+ },
+ {
+  "key": "gov-uk-05",
+  "run": "gov-uk",
+  "id": "05",
+  "score": 0.47,
+  "dom": 0.616,
+  "pixels": 0.25,
+  "heightRatio": 1.021,
+  "readable": 1,
+  "gaps": {
+   "position": 0.34,
+   "size": 0.045
+  },
+  "cropped": true
+ },
+ {
+  "key": "gov-uk-06",
+  "run": "gov-uk",
+  "id": "06",
+  "score": 0.488,
+  "dom": 0.578,
+  "pixels": 0.354,
+  "heightRatio": 1.307,
+  "readable": 1,
+  "gaps": {
+   "position": 0.35,
+   "size": 0.072
+  },
+  "cropped": false
+ },
+ {
+  "key": "gov-uk-07",
+  "run": "gov-uk",
+  "id": "07",
+  "score": 0.485,
+  "dom": 0.658,
+  "pixels": 0.226,
+  "heightRatio": 2.092,
+  "readable": 1,
+  "gaps": {
+   "position": 0.263,
+   "size": 0.022,
+   "color": 0.058
+  },
+  "cropped": true
+ },
+ {
+  "key": "mozilla-org-en-us-01",
+  "run": "mozilla-org-en-us",
+  "id": "01",
+  "score": 0.568,
+  "dom": 0.775,
+  "pixels": 0.257,
+  "heightRatio": 1.061,
+  "readable": 1,
+  "gaps": {
+   "position": 0.225
+  },
+  "cropped": false
+ },
+ {
+  "key": "mozilla-org-en-us-02",
+  "run": "mozilla-org-en-us",
+  "id": "02",
+  "score": 0.595,
+  "dom": 0.776,
+  "pixels": 0.324,
+  "heightRatio": 0.673,
+  "readable": 1,
+  "gaps": {
+   "position": 0.124,
+   "size": 0.1
+  },
+  "cropped": false
+ },
+ {
+  "key": "mozilla-org-en-us-03",
+  "run": "mozilla-org-en-us",
+  "id": "03",
+  "score": 0.453,
+  "dom": null,
+  "pixels": 0.453,
+  "heightRatio": 1.012,
+  "readable": 1,
+  "gaps": {},
+  "cropped": false
+ },
+ {
+  "key": "mozilla-org-en-us-04",
+  "run": "mozilla-org-en-us",
+  "id": "04",
+  "score": 0.58,
+  "dom": 0.717,
+  "pixels": 0.374,
+  "heightRatio": 0.981,
+  "readable": 1,
+  "gaps": {
+   "position": 0.185,
+   "size": 0.049,
+   "font-size": 0.013,
+   "weight": 0.015,
+   "color": 0.019
+  },
+  "cropped": false
+ },
+ {
+  "key": "mozilla-org-en-us-05",
+  "run": "mozilla-org-en-us",
+  "id": "05",
+  "score": 0.781,
+  "dom": 0.878,
+  "pixels": 0.636,
+  "heightRatio": 1.242,
+  "readable": 1,
+  "gaps": {
+   "position": 0.122
+  },
+  "cropped": false
+ },
+ {
+  "key": "mozilla-org-en-us-06",
+  "run": "mozilla-org-en-us",
+  "id": "06",
+  "score": 0.453,
+  "dom": null,
+  "pixels": 0.453,
+  "heightRatio": 1.012,
+  "readable": 1,
+  "gaps": {},
+  "cropped": false
+ },
+ {
+  "key": "mozilla-org-en-us-07",
+  "run": "mozilla-org-en-us",
+  "id": "07",
+  "score": 0.586,
+  "dom": 0.742,
+  "pixels": 0.353,
+  "heightRatio": 0.875,
+  "readable": 1,
+  "gaps": {
+   "position": 0.192,
+   "size": 0.043,
+   "weight": 0.023
+  },
+  "cropped": false
+ },
+ {
+  "key": "mozilla-org-en-us-08",
+  "run": "mozilla-org-en-us",
+  "id": "08",
+  "score": 0.629,
+  "dom": 0.83,
+  "pixels": 0.327,
+  "heightRatio": 1.455,
+  "readable": 1,
+  "gaps": {
+   "position": 0.169
+  },
+  "cropped": true
+ },
+ {
+  "key": "mozilla-org-en-us-09",
+  "run": "mozilla-org-en-us",
+  "id": "09",
+  "score": 0.537,
+  "dom": 0.7,
+  "pixels": 0.292,
+  "heightRatio": 1.008,
+  "readable": 1,
+  "gaps": {
+   "position": 0.3
+  },
+  "cropped": false
+ },
+ {
+  "key": "mozilla-org-en-us-10",
+  "run": "mozilla-org-en-us",
+  "id": "10",
+  "score": 0.865,
+  "dom": 0.871,
+  "pixels": 0.855,
+  "heightRatio": 0.984,
+  "readable": 1,
+  "gaps": {
+   "position": 0.113,
+   "size": 0.016
+  },
+  "cropped": false
+ },
+ {
+  "key": "mozilla-org-en-us-11",
+  "run": "mozilla-org-en-us",
+  "id": "11",
+  "score": 0.65,
+  "dom": 0.862,
+  "pixels": 0.332,
+  "heightRatio": 1.073,
+  "readable": 1,
+  "gaps": {
+   "position": 0.13,
+   "size": 0.008
+  },
+  "cropped": false
+ },
+ {
+  "key": "mozilla-org-en-us-12",
+  "run": "mozilla-org-en-us",
+  "id": "12",
+  "score": 0.516,
+  "dom": 0.689,
+  "pixels": 0.257,
+  "heightRatio": 1.656,
+  "readable": 1,
+  "gaps": {
+   "position": 0.282,
+   "size": 0.027
+  },
+  "cropped": true
+ }
+]

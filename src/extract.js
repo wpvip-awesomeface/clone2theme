@@ -69,6 +69,31 @@ function cleanSections() {
       else img.remove();
     });
     // Buttons that are really links become links so they survive conversion.
+    // Tags with no block of their own would end up as raw HTML: map them onto ones that convert.
+    const swap = (n, tag) => {
+      const d = document.createElement(tag);
+      for (const at of n.attributes) d.setAttribute(at.name, at.value);
+      d.append(...n.childNodes);
+      n.replaceWith(d);
+      return d;
+    };
+    el.querySelectorAll('cite, q, dfn').forEach((n) => swap(n, 'span'));
+    el.querySelectorAll('dl').forEach((n) => swap(n, 'div'));
+    el.querySelectorAll('dt, dd').forEach((n) => swap(n, 'p'));
+    // A link wrapped around a whole card: the card stays blocks, the link moves onto its first line of text.
+    el.querySelectorAll('a').forEach((a) => {
+      if (!a.querySelector('div,p,h1,h2,h3,h4,h5,h6,ul,ol,dl,section,article,figure,table')) return;
+      const href = a.getAttribute('href');
+      const d = swap(a, 'div');
+      d.removeAttribute('href'); d.removeAttribute('target');
+      const first = [...d.querySelectorAll('h1,h2,h3,h4,h5,h6,p,span')].find((x) => x.textContent.trim() && !x.querySelector('a'));
+      if (first && href) {
+        const link = document.createElement('a');
+        link.setAttribute('href', href);
+        link.append(...first.childNodes);
+        first.append(link);
+      }
+    });
     // JS buttons keep their place and box (id) as links; drawn as boxes they become core/button.
     el.querySelectorAll('button').forEach((b) => {
       const a = document.createElement('a');

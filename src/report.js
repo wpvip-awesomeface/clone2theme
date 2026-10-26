@@ -27,6 +27,8 @@ export function report(ctx) {
   const scores = Object.fromEntries((s.verify?.sections || []).map((v) => [v.id, v]));
   const failing = (s.verify?.sections || []).filter((v) => v.status === 'fail');
   if (failing.length) needsHuman.push({ why: `${failing.length} of ${s.verify.sections.length} sections look different (below ${Math.round(CLOSE * 100)}% match): ${failing.map((v) => v.id).join(', ')}` });
+  if (s.verify?.mobile?.overflow) needsHuman.push({ why: `the clone scrolls sideways on a phone (${s.verify.mobile.width}px wide at 390px): ${s.verify.mobile.wide.join(', ')}` });
+  if (s.verify?.editability?.invalid) needsHuman.push({ why: `${s.verify.editability.invalid} blocks show "unexpected content" in the editor` });
   if (s.verify && s.verify.status !== 200) needsHuman.push({ why: `local page returned HTTP ${s.verify.status}` });
 
   const data = {
@@ -40,6 +42,7 @@ export function report(ctx) {
     scores: s.verify ? { page: s.verify.pageScore, avg: s.verify.avgScore, passing: s.verify.passing, of: s.verify.sections.length } : null,
     gaps: gapTotals(s.verify?.sections || []),
     editability: s.verify?.editability || null,
+    mobile: s.verify?.mobile ? { overflow: s.verify.mobile.overflow, width: s.verify.mobile.width, height: s.verify.mobile.height } : null,
     ai: s.convert?.ai ? { used: s.convert.ai.used, calls: s.convert.ai.calls, cached: s.convert.ai.cached, tokens: s.convert.ai.spent, cap: s.convert.ai.cap } : null,
     needsHuman,
   };
@@ -105,7 +108,7 @@ a{color:inherit}.meta{color:var(--mute);font-size:13px;margin:6px 0}code{font-si
 .issues{padding-left:18px}.issues li{margin:6px 0}.ok{color:var(--good)}
 .swatches{display:flex;flex-wrap:wrap;gap:10px}.sw{display:flex;align-items:center;gap:8px;font-size:13px}.sw i{width:28px;height:28px;border-radius:6px;border:1px solid var(--line);display:inline-block}
 .compare{display:grid;grid-template-columns:1fr 1fr;gap:16px}.compare figure{margin:0;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px;max-height:900px;overflow:auto}
-.compare img,.card img{width:100%;height:auto;display:block;border-radius:6px}figcaption{font-size:13px;color:var(--mute);margin-bottom:8px}
+.compare.phone{max-width:820px}.compare img,.card img{width:100%;height:auto;display:block;border-radius:6px}figcaption{font-size:13px;color:var(--mute);margin-bottom:8px}
 .trio{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;align-items:start}.trio figure{margin:0;max-height:420px;overflow:hidden}.trio figcaption{font-size:11px;margin-bottom:4px}
 .gapbar{display:flex;height:10px;border-radius:5px;overflow:hidden;margin:6px 0;background:var(--line)}.gapbar i{display:block}
 .key::before{content:"";display:inline-block;width:9px;height:9px;border-radius:2px;background:var(--c);margin-right:4px}
@@ -125,6 +128,7 @@ ${d.ai ? `<p class="meta">ai: ${d.ai.used.length ? `Haiku rebuilt ${d.ai.used.jo
 ${d.scores ? `<h2>match scores</h2><p class="meta">whole page ${pct(d.scores.page)} · section average ${pct(d.scores.avg)} · ${d.scores.passing} of ${d.scores.of} sections pass (≥85%). a section score is 60% elements (every text block and image found, in place, in the right style) and 40% pixels (backgrounds, borders, icons).</p>` : ''}
 ${d.editability && !d.editability.error ? `<h2>editable in WordPress</h2><p class="meta">${d.editability.blocks} blocks · <b class="${d.editability.invalid ? 'bad' : 'good'}">${d.editability.invalid} invalid</b> · <b class="${d.editability.rawHtml ? 'bad' : 'good'}">${d.editability.rawHtml} raw HTML</b> · ${d.editability.linkedImages} of ${d.editability.images} images in the media library · ${d.editability.presetValues} styles from theme presets, ${d.editability.customValues} one-off values. (page content; header and footer are template parts)</p>` : ''}
 ${d.gaps && Object.keys(d.gaps).length ? `<h2>where the points go</h2>${gapBar(d.gaps)}<p class="meta">points lost per gap kind, averaged over sections. missing = not found in the clone; position = offset from where it sits next to its neighbor; size = box or image size; the rest are text styles.</p>` : ''}
+${d.mobile ? `<h2>on a phone (390px)</h2><p class="meta">${d.mobile.overflow ? `<b class="bad">scrolls sideways (${d.mobile.width}px)</b>` : '<b class="good">no sideways scroll</b>'} · WordPress stacks columns on phones; the original may use its own mobile layout.</p><div class="compare phone"><figure><figcaption>original</figcaption><img loading="lazy" src="capture/mobile.png" alt="original on a phone"></figure><figure><figcaption>local clone</figcaption><img loading="lazy" src="verify/mobile.png" alt="clone on a phone"></figure></div>` : ''}
 <h2>original vs local</h2><div class="compare"><figure><figcaption>original</figcaption>${s.capture ? '<img loading="lazy" src="capture/full.png" alt="original page">' : ''}</figure><figure><figcaption>local clone</figcaption>${local}</figure></div>
 <h2>sections</h2><div class="cards">${cards}</div>
 </main></body></html>`;

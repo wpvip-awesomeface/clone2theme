@@ -7,13 +7,14 @@ import { write } from './guard.js';
 import { collectElements, collectLayout } from './elements.js';
 
 const VIEWPORT = { width: 1440, height: 900 };
+const MOBILE = { width: 390, height: 844 };
 const MAX_ASSETS = 80;
 const MAX_ASSET_BYTES = 8 * 1024 * 1024;
 
 export async function capture(ctx, dir) {
   const browser = await launch();
   try {
-    const context = await browser.newContext({ viewport: VIEWPORT, ignoreHTTPSErrors: true });
+    const context = await browser.newContext({ viewport: VIEWPORT, ignoreHTTPSErrors: true, bypassCSP: true }); // our measuring styles must apply on strict-CSP sites
     const page = await context.newPage();
     await page.goto(ctx.url, { waitUntil: 'load', timeout: 60000 });
     await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {}); // chatty trackers never idle
@@ -32,8 +33,18 @@ export async function capture(ctx, dir) {
       await page.screenshot({ path: path.join(dir, 'sections', `${s.id}.png`), clip, fullPage: true }).catch(() => {});
     }
 
+    const icons = await exportVectors(page, dom, path.join(dir, 'assets'));
+    // Phone view of the original, for the report's mobile comparison.
+    const phone = await browser.newContext({ viewport: MOBILE, isMobile: true, hasTouch: true, ignoreHTTPSErrors: true });
+    try {
+      const m = await phone.newPage();
+      await m.goto(ctx.url, { waitUntil: 'load', timeout: 60000 });
+      await m.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+      await autoScroll(m);
+      await m.screenshot({ path: path.join(dir, 'mobile.png'), fullPage: true });
+    } catch { /* mobile view is optional */ } finally { await phone.close(); }
     write(path.join(dir, 'raw.html'), await page.content());
-    const assets = await downloadAssets(context, dom.assetUrls, path.join(dir, 'assets'));
+    const assets = { ...(await downloadAssets(context, dom.assetUrls, path.join(dir, 'assets'))), ...icons };
     const faces = await fontFaces(context, dom, path.join(dir, 'assets', 'fonts'));
     write(path.join(dir, 'dom.json'), { ...dom, assets, fontFaces: faces });
 
@@ -295,6 +306,68 @@ function analyze() {
       maxWidths: top(widths, 4),
     },
   };
+}
+
+// Icons and drawings made of SVG (inline <svg> or .svg images) become transparent PNGs, so they turn
+// into ordinary image blocks the user can replace (WordPress doesn't take SVG uploads by default).
+// Each one is shot alone: everything else is hidden for the screenshot, so no background comes along.
+const MAX_VECTORS = 200;
+async function exportVectors(page, dom, dir) {
+  fs.mkdirSync(dir, { recursive: true });
+  const found = await page.evaluate((max) => {
+    const out = [];
+    document.querySelectorAll('[data-c2t-section]').forEach((sec) => {
+      const base = sec.getBoundingClientRect();
+      const id = sec.getAttribute('data-c2t-section');
+      sec.querySelectorAll('svg, img').forEach((el) => {
+        if (out.length >= max || el.closest('[data-c2t-hidden]')) return;
+        if (el.tagName === 'IMG' ? !/\.svg(\?|$)/i.test(el.currentSrc || el.src) : el.parentElement?.closest('svg')) return;
+        const r = el.getBoundingClientRect();
+        const cs = getComputedStyle(el);
+        if (r.width < 8 || r.height < 8 || r.width > 1440 || r.height > 1200 || cs.display === 'none' || cs.visibility === 'hidden') return;
+        const key = `${id}-v${out.length}`;
+        el.setAttribute('data-c2t-vector', key);
+        out.push({ key, section: id, was: el.getAttribute('data-c2t-id'), box: { x: Math.round(r.left - base.left), y: Math.round(r.top - base.top), w: Math.round(r.width), h: Math.round(r.height) },
+          alt: el.getAttribute('aria-label') || el.querySelector?.('title')?.textContent || el.getAttribute('alt') || '' });
+      });
+    });
+    return out;
+  }, MAX_VECTORS);
+  if (!found.length) return {};
+  const solo = await page.addStyleTag({ content: '*{visibility:hidden!important}[data-c2t-solo],[data-c2t-solo] *{visibility:visible!important}' });
+  const files = {};
+  for (const v of found) {
+    const sel = `[data-c2t-vector="${v.key}"]`;
+    await page.evaluate((q) => document.querySelector(q)?.setAttribute('data-c2t-solo', ''), sel);
+    const file = `vector-${v.key}.png`;
+    const ok = await page.locator(sel).screenshot({ path: path.join(dir, file), omitBackground: true, timeout: 5000 }).then(() => true).catch(() => false);
+    await page.evaluate((q) => document.querySelector(q)?.removeAttribute('data-c2t-solo'), sel);
+    if (ok) files[v.key] = file;
+  }
+  await solo.evaluate((n) => n.remove());
+  // Swap each exported vector for an <img> the rest of the pipeline already understands.
+  const map = {};
+  for (const v of found) {
+    if (!files[v.key]) continue;
+    const url = `https://c2t.invalid/vector/${files[v.key]}`;
+    map[url] = files[v.key];
+    (dom.layout[v.section] ||= {})[v.key] = v.box;
+    // An .svg <img> the scorer already knows now arrives as this PNG.
+    for (const e of dom.elements?.[v.section] || []) if (e.kind === 'img' && v.was && e.id === v.was) { e.src = url; e.id = v.key; }
+  }
+  await page.evaluate((list) => list.forEach(({ key, url, alt, w, h }) => {
+    const el = document.querySelector(`[data-c2t-vector="${key}"]`);
+    if (!el) return;
+    const img = document.createElement('img');
+    img.setAttribute('data-c2t-src', url);
+    img.setAttribute('src', url);
+    img.setAttribute('width', String(w));
+    img.setAttribute('height', String(h));
+    img.setAttribute('alt', alt);
+    img.setAttribute('data-c2t-id', key);
+    el.replaceWith(img);
+  }), found.filter((v) => files[v.key]).map((v) => ({ key: v.key, url: `https://c2t.invalid/vector/${files[v.key]}`, alt: v.alt, w: v.box.w, h: v.box.h })));
+  return map;
 }
 
 async function downloadAssets(context, urls, dir) {

@@ -8,19 +8,22 @@ import { read, write } from './guard.js';
 import { collectElements, compareSection } from './elements.js';
 import { devenv } from './devenv.js';
 
+// Grade thresholds and the element/pixel mix: fitted to human labels by bin/calibrate.js when
+// calibration/weights.json exists, otherwise the hand-set defaults.
+const CAL = (() => { try { return JSON.parse(fs.readFileSync(new URL('../calibration/weights.json', import.meta.url), 'utf8')); } catch { return null; } })();
 const DIFF_WIDTH = 320; // both sides are scaled to this width before diffing
 const COARSE_WIDTH = 48;
 const MAX_DIFF_HEIGHT = 2400;
-const DOM_WEIGHT = 0.6; // share of a section score from the element match; the rest is pixels
-export const PASS = 0.85;
-export const CLOSE = 0.65;
+const DOM_WEIGHT = CAL?.domWeight ?? 0.6; // share of a section score from the element match; the rest is pixels
+export const PASS = CAL?.pass ?? 0.85;
+export const CLOSE = CAL?.acceptable ?? 0.65; // "close enough": a few minutes of editing
 export const SCORER = 4; // bump when scoring changes: score-guard decisions from older scorers are re-made
 
 export async function verify(ctx, dir) {
   const { siteUrl } = read(path.join(ctx.dir, 'push', 'done.json'));
   const conv = read(path.join(ctx.dir, 'convert', 'done.json'));
   const browser = await launch({ local: true });
-  let status, height, broken, found, readable, localEls, edit;
+  let status, height, broken, found, readable, localEls, edit, mobile;
   fs.mkdirSync(path.join(dir, 'sections'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'diff'), { recursive: true });
   try {
@@ -65,6 +68,7 @@ export async function verify(ctx, dir) {
     for (const id of found) {
       await page.locator(`[data-c2t-local="${id}"]`).screenshot({ path: path.join(dir, 'sections', `${id}.png`) }).catch(() => {});
     }
+    mobile = await phoneCheck(browser, siteUrl, path.join(dir, 'mobile.png')).catch((e) => ({ error: e.message.slice(0, 200) }));
     edit = await editability(browser, siteUrl, read(path.join(ctx.dir, 'push', 'state.json')).pageId, devenv(ctx.site).loginKey()).catch((e) => ({ error: e.message.slice(0, 200) }));
   } finally {
     await browser.close();
@@ -103,11 +107,33 @@ export async function verify(ctx, dir) {
     avgScore: scored.length ? round(scored.reduce((a, s) => a + s.score, 0) / scored.length) : null,
     passing: scored.filter((s) => s.status === 'pass').length,
     editability: edit,
+    mobile,
     sections,
   };
 }
 
 const round = (n) => Math.round(n * 1000) / 1000;
+
+// Phone view of the clone: horizontal overflow is a hard failure; the screenshot goes in the report.
+async function phoneCheck(browser, siteUrl, file) {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, ignoreHTTPSErrors: true });
+  try {
+    const page = await ctx.newPage();
+    await page.goto(siteUrl, { waitUntil: 'networkidle', timeout: 60000 });
+    await page.addStyleTag({ content: '#wpadminbar{display:none!important}html{margin-top:0!important}' });
+    const r = await page.evaluate(() => ({
+      width: document.documentElement.scrollWidth,
+      viewport: innerWidth,
+      wide: [...document.querySelectorAll('body *')].filter((e) => e.getBoundingClientRect().right > innerWidth + 2 && getComputedStyle(e).position !== 'fixed')
+        .slice(0, 5).map((e) => `${e.tagName.toLowerCase()}.${String(e.className).split(' ')[0]} ${Math.round(e.getBoundingClientRect().width)}px`),
+      height: document.documentElement.scrollHeight,
+    }));
+    await page.screenshot({ path: file, fullPage: true });
+    return { overflow: r.width > r.viewport + 1, ...r };
+  } finally {
+    await ctx.close();
+  }
+}
 
 // How editable the page is in the real block editor: every block valid (no "unexpected content"),
 // no raw HTML blocks, images linked to the media library, styles from presets rather than one-off values.
