@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Clone a live page into a WordPress block theme on a VIP dev-env.",
   "bin": {
+    "clone2theme": "bin/c2t.js",
     "c2t": "bin/c2t.js"
   },
   "dependencies": {

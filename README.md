@@ -3,8 +3,26 @@
 Clone a live page into a WordPress block theme on a local VIP dev-env. One Node CLI, no server.
 Each run writes `runs/<slug>/report.html` (visual check) and `report.json` (small summary for agents).
 
+## Quick start
+
 ```bash
-npm ci
+cd clone2theme && npm ci && npm link     # once: installs the `clone2theme` (and `c2t`) command
+clone2theme example.com                  # clone a page: zero AI, ~4 min, opens the report and the clone
+```
+
+The first run checks everything it needs and offers to install what's missing (same as `clone2theme setup`):
+Node 20.12+, the tool's dependencies, a browser engine (Playwright Chromium, or an installed Chrome/Brave/Edge),
+Docker Desktop (via Homebrew), the VIP CLI, and a local VIP dev-env (`vip-local`, subdomain multisite, theme folder
+at `~/clone2theme/app-code` from vip-go-skeleton). It asks before each install; `--yes` accepts all. Node and
+Docker's first launch can't be fully automated: it tells you exactly what to do.
+
+`clone2theme <url>` takes a full URL or a bare domain. Flags: `--ai` (Haiku pass for weak sections),
+`--no-open`, `--fresh`. The clone opens in a separate Chrome/Brave window that bypasses a system SOCKS proxy
+for `*.lndo.site` (otherwise the vip proxy tunnel answers with an SSH banner). Needs a running VIP dev-env (see below).
+
+## All commands
+
+```bash
 node bin/c2t.js run https://example.com --no-ai          # full pipeline, zero model calls
 node bin/c2t.js step convert --run example-com           # rerun convert and everything after
 node bin/c2t.js step convert --run example-com --only    # rerun just convert
