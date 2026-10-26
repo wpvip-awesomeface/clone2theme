@@ -1,0 +1,31 @@
+{
+ "fit": 0.832781954887218,
+ "domWeight": 0.95,
+ "acceptable": 0.7,
+ "pass": 0.87,
+ "accAcceptable": 0.8403508771929824,
+ "accPass": 0.8214285714285714,
+ "labeled": 49,
+ "counts": {
+  "good": 7,
+  "ok": 23,
+  "bad": 19
+ },
+ "at": "2026-10-26T17:07:51.248Z",
+ "disagree": [
+  "basecamp-com-04: human ok, grade bad (61%)",
+  "basecamp-com-05: human ok, grade bad (59%)",
+  "basecamp-com-07: human ok, grade bad (60%)",
+  "basecamp-com-12: human ok, grade bad (61%)",
+  "basecamp-com-14: human good, grade ok (70%)",
+  "basecamp-com-15: human ok, grade bad (58%)",
+  "basecamp-com-18: human ok, grade bad (49%)",
+  "basecamp-com-20: human ok, grade bad (0%)",
+  "dentalcorp-ca-02: human ok, grade good (97%)",
+  "dentalcorp-ca-06: human ok, grade good (89%)",
+  "dentalcorp-ca-09: human ok, grade good (95%)",
+  "gov-uk-06: human ok, grade bad (57%)",
+  "mozilla-org-en-us-02: human bad, grade ok (75%)",
+  "mozilla-org-en-us-07: human good, grade ok (72%)"
+ ]
+}

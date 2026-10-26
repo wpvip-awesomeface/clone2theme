@@ -1,0 +1,8 @@
+{
+  "at": "2026-10-26T00:00:00Z",
+  "by": "claude",
+  "note": "table rows boxed, columns misaligned",
+  "run": "mozilla-org-en-us",
+  "section": "09",
+  "verdict": "bad"
+}

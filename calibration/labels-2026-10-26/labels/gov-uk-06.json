@@ -1,0 +1,8 @@
+{
+  "at": "2026-10-26T00:00:00Z",
+  "by": "claude",
+  "note": "buttons lose their outline style",
+  "run": "gov-uk",
+  "section": "06",
+  "verdict": "ok"
+}
