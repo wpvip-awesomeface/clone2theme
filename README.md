@@ -3,7 +3,7 @@
 **Turn any web page into an editable WordPress block theme, in about 4 minutes.**
 
 ```bash
-clone2theme caribou.com
+clone2theme example.com
 ```
 
 You give it a URL. It copies the page into a local WordPress site as real blocks (headings, images, buttons, columns, covers), not a screenshot or a blob of HTML. Then it opens the clone and a report showing how close it got, section by section.
@@ -34,7 +34,7 @@ The first run checks for Docker, the VIP CLI and a local WordPress, and asks bef
 
 **3. Look at the result.** When it finishes, two windows open:
 
-- **The clone:** your page, live on local WordPress (`c2t-<site>.vip-local.vipdev.lndo.site`).
+- **The clone:** your page, live on local WordPress (`c2t-example-com.vip-local.vipdev.lndo.site`).
 - **The report:** the original next to the clone for every section, with a match score.
 
 Scores: **85%+ pass**, **65%+ close**, below that needs work.
