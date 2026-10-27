@@ -57,7 +57,41 @@ Scores: **85%+ pass**, **65%+ close**, below that needs work.
 
 A Mac with [Homebrew](https://brew.sh) and Node 20.12+. Setup handles the rest: Docker Desktop, the VIP CLI, a browser engine, and a local VIP dev-env called `vip-local`. Node, and Docker's first launch, need a click from you; setup tells you exactly what to do.
 
-For `--ai`: put `ANTHROPIC_API_KEY` in a `.env` file in this folder (copy `.env.example`). It's gitignored.
+## Make it better with AI (optional)
+
+By default clone2theme uses no AI. Add `--ai` and it sends only the **weak sections** (raw HTML, or under 65%) to a small, fast model, **Claude Haiku**, to rebuild them as proper columns, cards and grids.
+
+```bash
+clone2theme example.com --ai
+```
+
+- **Small model, small bill.** Only weak sections go out, each one once. Results are cached, so a rerun costs nothing.
+- **Hard cap.** At most 80,000 tokens per run by default (`--ai-budget 40000` to lower it). Calls that won't fit are skipped, never cut off.
+- **Can't make things worse.** If the AI version scores lower than the plain one, the plain one is kept.
+- **Try a bigger model** for comparison: `C2T_MODEL=claude-sonnet-5-5 clone2theme example.com --ai`.
+
+### Where to put your API key (safely)
+
+1. Get a key from the [Claude Console](https://console.anthropic.com) → **API keys**.
+2. In the clone2theme folder, copy the example file and paste your key in:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+   ```
+   ANTHROPIC_API_KEY=sk-ant-...
+   ```
+
+3. Run with `--ai`. That's it.
+
+**Why `.env` is safe:** it lives only on your machine. It's listed in `.gitignore`, so git never commits or pushes it. clone2theme reads it at startup and sends the key only to Anthropic's API.
+
+**Do not:** paste the key into `.env.example`, the README, a commit, Slack, or a shared doc. If a key leaks, delete it in the Console and make a new one.
+
+**Prefer not to keep a file?** Set it for one terminal session instead: `export ANTHROPIC_API_KEY=sk-ant-...`. An `ant auth login` profile also works.
+
+No key? `--ai` just skips the AI pass and says so in the report. Nothing breaks.
 
 ## Troubleshooting
 
@@ -109,7 +143,8 @@ With `--ai`, after the first verify, sections that came out as raw HTML or score
 - **Score guard:** if the AI version scores no higher than the plain one, the plain one is kept and pinned (`keepPlain` in `convert/done.json`).
 - **Cache:** `cache/ai/<sha256>.json`. A section is never paid for twice, and cache hits work offline.
 - **Token cap:** `--ai-budget` per run, tracked in `runs/<slug>/ai-usage.json`. Calls that won't fit are skipped.
-- **Credentials:** `ANTHROPIC_API_KEY` in `.env`, the shell environment, or an `ant auth login` profile. Without them the pass is skipped with one line in the report.
+- **Credentials:** see [Where to put your API key](#where-to-put-your-api-key-safely). Without them the pass is skipped with one line in the report.
+- **Model:** `C2T_MODEL` overrides the default `claude-haiku-5-5`; the cache is keyed by model.
 
 ### Match scores
 
