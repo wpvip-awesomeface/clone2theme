@@ -31,5 +31,15 @@ add_action(
 				'inline_style' => '.wp-block-list.is-style-plain{list-style:none;padding-left:0}',
 			)
 		);
+		// "Slider" group style: a row of slides that scrolls sideways and snaps to each slide. CSS only.
+		register_block_style(
+			'core/group',
+			array(
+				'name'         => 'c2t-slider',
+				'label'        => __( 'Slider', 'c2t' ),
+				'inline_style' => '.wp-block-group.is-style-c2t-slider{overflow-x:auto;scroll-snap-type:x mandatory;overscroll-behavior-x:contain;scrollbar-width:thin}'
+					. '.wp-block-group.is-style-c2t-slider>*{flex-shrink:0;max-width:100%;scroll-snap-align:start}',
+			)
+		);
 	}
 );
