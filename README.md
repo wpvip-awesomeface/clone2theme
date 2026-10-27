@@ -39,6 +39,15 @@ The first run checks for Docker, the VIP CLI and a local WordPress, and asks bef
 
 Scores: **85%+ pass**, **65%+ close**, below that needs work.
 
+**4. Come back to it later.** Closed the windows? Reopen both any time:
+
+```bash
+clone2theme list               # every page you've cloned, with its name
+clone2theme open example-com   # reopen that clone and its report
+```
+
+The name is the domain with dots turned into dashes (`example.com` → `example-com`).
+
 ## Everyday commands
 
 | You want to… | Run |
@@ -48,7 +57,7 @@ Scores: **85%+ pass**, **65%+ close**, below that needs work.
 | Start over and ignore the cache | `clone2theme example.com --fresh` |
 | Don't open windows when done | `clone2theme example.com --no-open` |
 | See everything you've cloned | `clone2theme list` |
-| Reopen a report | `clone2theme open example-com` |
+| Reopen a clone and its report | `clone2theme open example-com` |
 | Check or fix the install | `clone2theme setup` |
 
 `c2t` is a short alias for `clone2theme`.
@@ -95,7 +104,7 @@ No key? `--ai` just skips the AI pass and says so in the report. Nothing breaks.
 
 ## Troubleshooting
 
-- **The clone shows "SSH-2.0-OpenSSH…"** A system SOCKS proxy (like the VIP proxy) is catching local sites. `clone2theme` opens the clone in a separate Chrome/Brave/Edge window that skips the proxy for `*.lndo.site`. Use that window, or turn the proxy off.
+- **The clone shows "SSH-2.0-OpenSSH…" or won't load.** The site is fine; a system proxy (like the VIP proxy) is catching local sites in your normal browser. Open it with `clone2theme open example-com` instead: that uses a separate Chrome/Brave/Edge window that skips the proxy for local sites. Or turn the proxy off.
 - **Something's missing or broken.** Run `clone2theme setup`.
 - **Run one site at a time.** Parallel runs slow each other down and skew the scores.
 
