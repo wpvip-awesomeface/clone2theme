@@ -31,6 +31,10 @@ export function report(ctx) {
   if (failing.length) needsHuman.push({ why: `${failing.length} of ${s.verify.sections.length} sections look different (below ${Math.round(CLOSE * 100)}% match): ${failing.map((v) => v.id).join(', ')}` });
   if (s.verify?.mobile?.overflow) needsHuman.push({ why: `the clone scrolls sideways on a phone (${s.verify.mobile.width}px wide at 390px): ${s.verify.mobile.wide.join(', ')}` });
   if (s.verify?.editability?.invalid) needsHuman.push({ why: `${s.verify.editability.invalid} blocks show "unexpected content" in the editor${s.verify.editability.invalidNames?.length ? ` (${s.verify.editability.invalidNames.join(", ")})` : ""}` });
+  // Hover inventory: kinds that change on hover but too differently to apply one rule.
+  const hoverKinds = s.extract?.tokens?.hover?.kinds || (exists(path.join(ctx.dir, 'extract', 'tokens.json')) ? read(path.join(ctx.dir, 'extract', 'tokens.json')).hover?.kinds : null) || {};
+  const loose = Object.entries(hoverKinds).filter(([, k]) => k.changed && !k.top);
+  if (loose.length) needsHuman.push({ why: `hover states not applied (each one changes differently): ${loose.map(([n, k]) => `${k.changed} of ${k.of} ${n}s`).join(', ')}. set them by hand under Styles` });
   if (s.verify && s.verify.status !== 200) needsHuman.push({ why: `local page returned HTTP ${s.verify.status}` });
 
   const data = {
@@ -46,6 +50,7 @@ export function report(ctx) {
     editability: s.verify?.editability || null,
     mobile: s.verify?.mobile ? { overflow: s.verify.mobile.overflow, width: s.verify.mobile.width, height: s.verify.mobile.height } : null,
     ai: s.convert?.ai ? { used: s.convert.ai.used, calls: s.convert.ai.calls, cached: s.convert.ai.cached, tokens: s.convert.ai.spent, cap: s.convert.ai.cap } : null,
+    hover: Object.keys(hoverKinds).length ? Object.fromEntries(Object.entries(hoverKinds).map(([n, k]) => [n, { changed: k.changed, of: k.of, effects: Object.keys(k.effects), applied: !!k.top }])) : null,
     needsHuman,
   };
   write(path.join(ctx.dir, 'report.json'), data);
@@ -126,6 +131,7 @@ a{color:inherit}.meta{color:var(--mute);font-size:13px;margin:6px 0}code{font-si
 <h2>needs a human</h2>${issues}
 <h2>design tokens</h2><div class="swatches">${palette.map((p) => `<span class="sw"><i style="background:${e(p.color)}"></i>${e(p.slug)} ${e(p.color)}</span>`).join('')}</div>
 <p class="meta">fonts: ${fonts.map((f) => `${e(f.slug)} = ${e(f.name)}`).join(' · ')} · content width ${e(s.extract?.tokens?.contentSize)}</p>
+${d.hover ? `<h2>hover states</h2><ul class="issues">${Object.entries(d.hover).map(([n, k]) => `<li><b>${e(n)}s</b>: ${k.changed} of ${k.of} change on hover${k.effects.length ? ` (${e(k.effects.join(', '))})` : ''} · <b class="${k.applied ? 'good' : k.changed ? 'bad' : 'wait'}">${k.applied ? 'applied' : k.changed ? 'mixed, not applied' : 'none'}</b></li>`).join('')}</ul>` : ''}
 ${d.ai ? `<p class="meta">ai: ${d.ai.used.length ? `Haiku rebuilt ${d.ai.used.join(', ')}` : 'no sections rebuilt'} · ${d.ai.calls} calls, ${d.ai.cached} cached · ${d.ai.tokens.toLocaleString()} of ${d.ai.cap.toLocaleString()} tokens</p>` : ''}
 ${d.scores ? `<h2>match scores</h2><p class="meta">whole page ${pct(d.scores.page)} · section average ${pct(d.scores.avg)} · ${d.scores.passing} of ${d.scores.of} sections pass (≥85%). a section score is 60% elements (every text block and image found, in place, in the right style) and 40% pixels (backgrounds, borders, icons).</p>` : ''}
 ${d.editability && !d.editability.error ? `<h2>editable in WordPress</h2><p class="meta">${d.editability.blocks} blocks · <b class="${d.editability.invalid ? 'bad' : 'good'}">${d.editability.invalid} invalid</b> · <b class="${d.editability.rawHtml ? 'bad' : 'good'}">${d.editability.rawHtml} raw HTML</b> · ${d.editability.linkedImages} of ${d.editability.images} images in the media library · ${d.editability.presetValues} styles from theme presets, ${d.editability.customValues} one-off values. (page content; header and footer are template parts)</p>` : ''}
