@@ -34,7 +34,7 @@ export async function extract(ctx, dir) {
 
 // Runs in a JS-disabled copy of the captured DOM.
 function cleanSections() {
-  const KEEP = new Set(['href', 'src', 'alt', 'width', 'colspan', 'rowspan', 'title', 'target', 'data-c2t-id', 'data-label', 'data-placeholder', 'data-button', 'data-c2t-bgimg']);
+  const KEEP = new Set(['href', 'src', 'alt', 'width', 'colspan', 'rowspan', 'title', 'target', 'data-c2t-id', 'data-label', 'data-placeholder', 'data-button', 'data-c2t-bgimg', 'data-c2t-slider', 'data-c2t-slide']);
   const DROP = 'script,style,noscript,link,meta,template,svg,iframe,form,input,select,textarea,button:empty,[data-c2t-hidden]';
   const out = {};
   document.querySelectorAll('[data-c2t-section]').forEach((sec) => {

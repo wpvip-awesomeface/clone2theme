@@ -199,7 +199,7 @@ function toBlocks({ html, band, bg, height, width, pad, bgColor: sectionBg, text
   const L = (n) => (n?.getAttribute ? layout[n.getAttribute('data-c2t-id')] : null);
   const px = (n) => `${Math.round(n)}px`;
   // Layout ids stay out of saved content; source-code line breaks are just spaces (not <br>), except in <pre>.
-  const leaf = (h) => rawHandler({ HTML: h.replace(/ data-c2t-id="[^"]*"/g, '').replace(/^(?![\s\S]*<pre)[\s\S]*$/, (x) => x.replace(/\s*\n\s*/g, ' ')) });
+  const leaf = (h) => rawHandler({ HTML: h.replace(/ data-c2t-(id|slider|slide)="[^"]*"/g, '').replace(/^(?![\s\S]*<pre)[\s\S]*$/, (x) => x.replace(/\s*\n\s*/g, ' ')) });
 
   // Plain conversion keeps the original's structure: side-by-side children become columns (wide items)
   // or a flex row (small items like links, stats, buttons); boxes with a border or their own background
@@ -216,7 +216,8 @@ function toBlocks({ html, band, bg, height, width, pad, bgColor: sectionBg, text
     for (const n of [...node.childNodes]) {
       if (n.nodeType === 3) { if (n.textContent.trim()) run.push(n); continue; }
       if (n.nodeType !== 1) continue;
-      if (n.tagName === 'C2T-SEARCH' || linkedImage(n) || gridLink(n)) { flush(); out.push(...blocksOf(n)); }
+      if (n.hasAttribute('data-c2t-slider')) { flush(); out.push(...slider(n)); }
+      else if (n.tagName === 'C2T-SEARCH' || linkedImage(n) || gridLink(n)) { flush(); out.push(...blocksOf(n)); }
       else if (BLOCK.test(n.tagName) && !rowList(n)) { flush(); out.push(...blocksOf(n)); }
       else if (INLINE.test(n.tagName) && !n.querySelector(HAS_BLOCK) && !linkedImage(n) && !gridLink(n)) {
         // Inline in the HTML but drawn on its own line (display:block in CSS): start a new paragraph.
@@ -268,7 +269,31 @@ function toBlocks({ html, band, bg, height, width, pad, bgColor: sectionBg, text
     const kids = [...n.children].filter((k) => L(k));
     return kids.length > 1 && linesOf(kids).some((l) => l.length > 1);
   }
+  // A slider becomes a row of slide groups that scrolls sideways and snaps (the theme's "Slider" group
+  // style): every slide stays an editable block, the first ones show at their original width.
+  function slider(n) {
+    const slides = [...n.querySelectorAll('[data-c2t-slide]')].filter((s) => !s.parentElement.closest('[data-c2t-slide]'));
+    const items = slides.map((s) => {
+      const d = document.createElement('div');
+      for (const at of s.attributes) d.setAttribute(at.name, at.value);
+      d.append(...[...s.childNodes].map((c) => c.cloneNode(true)));
+      return { box: L(s), blocks: container(d) };
+    }).filter((x) => x.blocks.length);
+    if (items.length < 2) { const d = n.cloneNode(true); d.removeAttribute('data-c2t-slider'); return container(d); }
+    const boxed = items.filter((x) => x.box);
+    const gaps = boxed.slice(1).map((x, i) => x.box.x - (boxed[i].box.x + boxed[i].box.w)).filter((g) => g >= 0 && g <= 120);
+    const gap = gaps.length ? Math.round(gaps.reduce((a, g) => a + g, 0) / gaps.length) : 16;
+    const shown = Math.max(1, Number(n.getAttribute('data-c2t-slider')) || 1);
+    const outer = L(n)?.w || 0;
+    const w = boxed[0]?.box.w || (outer ? (outer - gap * (shown - 1)) / shown : 0);
+    const row = createBlock('core/group', { className: 'is-style-c2t-slider', layout: { type: 'flex', flexWrap: 'nowrap', verticalAlignment: 'top' }, style: { spacing: { blockGap: px(gap) } } },
+      items.map((x) => createBlock('core/group', { layout: { type: 'default' }, ...(w ? { style: { layout: { selfStretch: 'fixed', flexSize: px(w) } } } : {}) }, x.blocks)));
+    // Only the slides that showed at once are in view: the window is as wide as they were, centered.
+    const view = w ? Math.round(shown * w + (shown - 1) * gap) : 0;
+    return view && (!width || view < width - 8) ? [createBlock('core/group', { layout: { type: 'constrained', contentSize: px(view) } }, [row])] : [row];
+  }
   function blocksOf(n) {
+    if (n.hasAttribute?.('data-c2t-slider')) return slider(n);
     const img = linkedImage(n);
     if (img) {
       const w = Number(img.getAttribute('width')) || 0;

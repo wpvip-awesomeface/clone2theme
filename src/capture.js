@@ -215,11 +215,43 @@ function analyze() {
     };
   });
 
+  // Sliders (carousels): the root gets data-c2t-slider (how many slides show at once), each slide
+  // data-c2t-slide. Loop clones are hidden so every slide appears once. Known libraries first, then any
+  // clipped box whose track lays 3+ similar children side by side past its edge.
+  function markSliders(root) {
+    const LIB = '.swiper,.swiper-container,.slick-slider,.splide,.glide,.flickity-enabled,.owl-carousel,.keen-slider,.embla,[aria-roledescription="carousel"]';
+    const SLIDE = '.swiper-slide,.slick-slide,.splide__slide,.glide__slide,.flickity-cell,.owl-item,.keen-slider__slide,.embla__slide,[aria-roledescription="slide"]';
+    const CLONE = '.swiper-slide-duplicate,.slick-cloned,.splide__slide--clone,.glide__slide--clone,.owl-item.cloned';
+    const mark = (box, slides) => {
+      slides = slides.filter((sl) => !sl.matches(CLONE));
+      if (slides.length < 2 || box.closest('[data-c2t-slider]')) return;
+      const b = box.getBoundingClientRect();
+      const shown = slides.filter((sl) => { const r = sl.getBoundingClientRect(); return r.width > 1 && r.left >= b.left - 2 && r.right <= b.right + 2; }).length;
+      box.setAttribute('data-c2t-slider', String(Math.max(1, shown)));
+      slides.forEach((sl) => sl.setAttribute('data-c2t-slide', ''));
+      box.querySelectorAll(CLONE).forEach((c) => c.setAttribute('data-c2t-hidden', '1'));
+    };
+    root.querySelectorAll(LIB).forEach((box) => mark(box, [...box.querySelectorAll(SLIDE)].filter((sl) => sl.parentElement.closest(LIB) === box)));
+    root.querySelectorAll('*').forEach((box) => {
+      if (box.closest('[data-c2t-slider]') || !/hidden|auto|scroll|clip/.test(getComputedStyle(box).overflowX)) return;
+      const b = box.getBoundingClientRect();
+      if (b.width < 200 || box.scrollWidth <= box.clientWidth + 20) return;
+      const track = [box, ...box.children].find((t) => t.children.length >= 3);
+      if (!track) return;
+      const kids = [...track.children].filter((k) => k.getBoundingClientRect().width > 40);
+      const rs = kids.map((k) => k.getBoundingClientRect());
+      const sameRow = rs.every((r) => Math.abs(r.top - rs[0].top) <= 4);
+      const sameSize = rs.every((r) => Math.abs(r.width - rs[0].width) <= rs[0].width * 0.15);
+      if (kids.length >= 3 && sameRow && sameSize && rs.some((r) => r.left >= b.right - 2)) mark(box, kids);
+    });
+  }
+
   // Freeze what the browser resolved so offline cleaning sees real URLs and visibility.
   const assetUrls = new Set();
   for (const s of sections) {
     const el = document.querySelector(`[data-c2t-section="${s.id}"]`);
     if (s.bg) assetUrls.add(s.bg);
+    markSliders(el);
     el.querySelectorAll('*').forEach((n) => {
       if (n.tagName === 'svg' || n.closest('svg')) return;
       // Closed <details> bodies report a normal computed style, so check for them explicitly.
