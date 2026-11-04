@@ -1,0 +1,15 @@
+/* Arrows and dots added by slider.js around a "Slider" group. */
+.c2t-slider{position:relative}
+.c2t-slider .is-style-c2t-slider{scrollbar-width:none}
+.c2t-slider .is-style-c2t-slider::-webkit-scrollbar{display:none}
+.c2t-slider__arrow{position:absolute;top:50%;width:44px;height:44px;margin-top:-40px;border:0;border-radius:50%;background:#fff;color:inherit;box-shadow:0 2px 10px rgba(0,0,0,.15);cursor:pointer;z-index:2}
+.c2t-slider__arrow::before{content:"";position:absolute;inset:0;margin:auto;width:10px;height:10px;border:solid currentColor;border-width:2px 2px 0 0;transform:translateX(-2px) rotate(45deg)}
+.c2t-slider__arrow--prev{left:-64px}
+.c2t-slider__arrow--prev::before{transform:translateX(2px) rotate(-135deg)}
+.c2t-slider__arrow--next{right:-64px}
+.c2t-slider__arrow:disabled{opacity:.35;cursor:default}
+.c2t-slider__dots{display:flex;justify-content:center;flex-wrap:wrap;gap:8px;margin-top:24px}
+.c2t-slider__dots button{width:10px;height:10px;padding:0;border:0;border-radius:50%;background:currentColor;opacity:.2;cursor:pointer}
+.c2t-slider__dots button[aria-current="true"]{opacity:.85}
+.c2t-slider.is-static .c2t-slider__arrow,.c2t-slider.is-static .c2t-slider__dots{display:none}
+@media (max-width:1300px){.c2t-slider__arrow--prev{left:8px}.c2t-slider__arrow--next{right:8px}}

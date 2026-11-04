@@ -41,5 +41,28 @@ add_action(
 					. '.wp-block-group.is-style-c2t-slider>*{flex-shrink:0;max-width:100%;scroll-snap-align:start}',
 			)
 		);
+		// "Card hover" group style: the hover effect measured on the original lives in theme.json (styles.css).
+		register_block_style(
+			'core/group',
+			array(
+				'name'  => 'c2t-card',
+				'label' => __( 'Card hover', 'c2t' ),
+			)
+		);
 	}
+);
+
+// Arrows and dots for sliders: loaded only on pages that have one (about 2 KB, deferred).
+add_filter(
+	'render_block_core/group',
+	function ( $html, $block ) {
+		if ( false !== strpos( $block['attrs']['className'] ?? '', 'is-style-c2t-slider' ) ) {
+			$ver = wp_get_theme()->get( 'Version' );
+			wp_enqueue_style( 'c2t-slider', get_theme_file_uri( 'assets/slider.css' ), array(), $ver );
+			wp_enqueue_script( 'c2t-slider', get_theme_file_uri( 'assets/slider.js' ), array(), $ver, array( 'strategy' => 'defer', 'in_footer' => true ) );
+		}
+		return $html;
+	},
+	10,
+	2
 );

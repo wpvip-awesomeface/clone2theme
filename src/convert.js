@@ -61,7 +61,7 @@ export async function convert(ctx, dir) {
         extraAssets[band] = file;
       }
       const aiHtml = html.replace(/ data-c2t-id="[^"]*"/g, ''); // ids are for layout lookups, not the model
-      const base = { html, band, bg: s.bg, height: s.height, width: sectionWidth(s), pad: !s.bg && exists(shot) ? padding(shot) : null, bgColor: s.bgColor, textColor: s.textColor, linkColor: s.linkColor, role: s.role,
+      const base = { html, band, bg: s.bg, height: s.height, width: sectionWidth(s), pad: !s.bg && exists(shot) ? padding(shot) : null, bgColor: s.bgColor, textColor: s.textColor, linkColor: s.linkColor, linkHover: tokens.hover?.bySection?.[s.id], cards: tokens.hover?.kinds?.card?.top ? tokens.hover.cards : [], role: s.role,
         layout: dom.layout?.[s.id] || {}, els: dom.elements?.[s.id] || [], fonts: tokens.fonts, sizes: tokens.fontSizes };
       let out = await page.evaluate(toBlocks, base);
       const plainUnclear = !empty && (out.total ? out.unclear / out.total : 1) > 0.5;
@@ -188,7 +188,7 @@ function fidelity(html, markup) {
 }
 
 // Runs in the block editor page.
-function toBlocks({ html, band, bg, height, width, pad, bgColor: sectionBg, textColor, linkColor, role, aiMarkup, layout = {}, els = [], fonts = [], sizes = [] }) {
+function toBlocks({ html, band, bg, height, width, pad, bgColor: sectionBg, textColor, linkColor, linkHover, cards = [], role, aiMarkup, layout = {}, els = [], fonts = [], sizes = [] }) {
   const { rawHandler, createBlock, serialize, parse, getBlockType } = wp.blocks;
   let bgColor = sectionBg; // may become a covering child's background (see below)
 
@@ -411,6 +411,14 @@ function toBlocks({ html, band, bg, height, width, pad, bgColor: sectionBg, text
   }
   // A box with a border, or a background different from what's behind it, becomes a framed group.
   function frame(n, inner) {
+    const out = framed0(n, inner);
+    // A card that reacts to hover on the original gets the theme's "Card hover" style (see build hoverCss).
+    if (!cards.includes(n.getAttribute?.('data-c2t-id')) || !out.length) return out;
+    const card = out.length === 1 && /^core\/(group|cover)$/.test(out[0].name) ? out[0] : createBlock('core/group', { layout: { type: 'default' } }, out);
+    card.attributes.className = [card.attributes.className, 'is-style-c2t-card'].filter(Boolean).join(' ');
+    return [card];
+  }
+  function framed0(n, inner) {
     const f = L(n);
     if (!f || !inner.length) return inner;
     let behind = null;
@@ -496,7 +504,7 @@ function toBlocks({ html, band, bg, height, width, pad, bgColor: sectionBg, text
           spacing: { padding: band ? { top: '0px', bottom: '0px' } : pad ? { top: `${pad.top}px`, bottom: `${pad.bottom}px` } : { top: 'var:preset|spacing|50', bottom: 'var:preset|spacing|50' } },
           // The original's own text and link colors, so dark sections don't inherit the theme's dark text.
           ...(solid(bgColor) || solid(textColor) ? { color: { ...(solid(bgColor) ? { background: solid(bgColor) } : {}), ...(solid(textColor) ? { text: solid(textColor) } : {}) } } : {}),
-          ...(solid(linkColor) ? { elements: { link: { color: { text: solid(linkColor) } } } } : {}),
+          ...(solid(linkColor) || linkHover ? { elements: { link: { ...(solid(linkColor) ? { color: { text: solid(linkColor) } } : {}), ...(linkHover ? { ':hover': { color: { text: linkHover } } } : {}) } } } : {}),
         },
       }, inner);
   return { markup: serialize([block]), total, unclear, counts };

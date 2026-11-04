@@ -33,6 +33,8 @@ export async function capture(ctx, dir) {
       await page.screenshot({ path: path.join(dir, 'sections', `${s.id}.png`), clip, fullPage: true }).catch(() => {});
     }
 
+    dom.hovers = await hoverStates(page).catch(() => []);
+    write(path.join(dir, 'hovers.json'), dom.hovers);
     const icons = await exportVectors(page, dom, path.join(dir, 'assets'));
     // Phone view of the original, for the report's mobile comparison.
     const phone = await browser.newContext({ viewport: MOBILE, isMobile: true, hasTouch: true, ignoreHTTPSErrors: true });
@@ -60,6 +62,75 @@ export async function capture(ctx, dir) {
   } finally {
     await browser.close();
   }
+}
+
+// Hover states: force :hover on every link and button through DevTools (no mouse, transitions off) and
+// record what changes on the element and inside it. The kind says where the state belongs in the theme.
+async function hoverStates(page) {
+  const count = await page.evaluate(() => {
+    const st = document.createElement('style');
+    st.id = 'c2t-still';
+    st.textContent = '*,*::before,*::after{transition:none!important;animation:none!important}';
+    document.head.append(st);
+    let i = 0;
+    document.querySelectorAll('[data-c2t-section] :is(a[href],button,[role="button"],summary)').forEach((el) => {
+      const r = el.getBoundingClientRect();
+      if (i >= 400 || el.closest('[data-c2t-hidden]') || r.width < 4 || r.height < 4) return;
+      el.setAttribute('data-c2t-hov', String(i++));
+    });
+    return i;
+  });
+  const snap = (i) => {
+    const el = document.querySelector(`[data-c2t-hov="${i}"]`);
+    const P = ['color', 'backgroundColor', 'borderTopColor', 'textDecorationLine', 'opacity', 'boxShadow', 'transform', 'filter'];
+    return [el, ...el.querySelectorAll('*')].slice(0, 30).map((n) => {
+      const cs = getComputedStyle(n);
+      const o = Object.fromEntries(P.map((p) => [p, cs[p]]));
+      if (cs.borderTopStyle === 'none' || !parseFloat(cs.borderTopWidth)) o.borderTopColor = ''; // follows the text color: no border to paint
+      if (/^(IMG|PICTURE|SVG|path)$/i.test(n.tagName)) o.color = ''; // inherited, never painted
+      return o;
+    });
+  };
+  const describe = (i) => {
+    const el = document.querySelector(`[data-c2t-hov="${i}"]`);
+    const cs = getComputedStyle(el);
+    const clear = (c) => !c || c === 'transparent' || /rgba\(.*,\s*0\)$/.test(c);
+    const framed = !clear(cs.backgroundColor) || (parseFloat(cs.borderTopWidth) > 0 && cs.borderTopStyle !== 'none' && !clear(cs.borderTopColor));
+    const block = el.querySelector('div,p,h1,h2,h3,h4,h5,h6,img,picture,figure,article');
+    const kind = el.tagName === 'BUTTON' || el.getAttribute('role') === 'button' || (framed && !block) ? 'button'
+      : block && el.querySelector('img') && el.textContent.trim() ? 'card'
+        : block && !el.textContent.trim() ? 'image'
+          : el.closest('nav,[role="navigation"],header') ? 'nav' : 'link';
+    return { kind, section: el.closest('[data-c2t-section]')?.getAttribute('data-c2t-section'), id: el.getAttribute('data-c2t-id'), text: el.textContent.trim().replace(/\s+/g, ' ').slice(0, 40), tags: [el, ...el.querySelectorAll('*')].slice(0, 30).map((n) => n.tagName) };
+  };
+  const out = [];
+  if (count) {
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('DOM.enable');
+    await cdp.send('CSS.enable');
+    const { root } = await cdp.send('DOM.getDocument', { depth: 0 });
+    const { nodeIds } = await cdp.send('DOM.querySelectorAll', { nodeId: root.nodeId, selector: '[data-c2t-hov]' });
+    // Document order is the order the indexes were handed out.
+    for (let i = 0; i < nodeIds.length; i++) {
+      const before = await page.evaluate(snap, i);
+      await cdp.send('CSS.forcePseudoState', { nodeId: nodeIds[i], forcedPseudoClasses: ['hover'] });
+      const after = await page.evaluate(snap, i);
+      await cdp.send('CSS.forcePseudoState', { nodeId: nodeIds[i], forcedPseudoClasses: [] });
+      const d = await page.evaluate(describe, i);
+      const changes = before.map((b, k) => ({ k, tag: d.tags[k], set: Object.fromEntries(Object.keys(b).filter((p) => b[p] !== after[k][p]).map((p) => [p, [b[p], after[k][p]]])) }))
+        .filter((c) => Object.keys(c.set).length);
+      // Inner text that only inherits the element's new color is already covered by the element itself.
+      const self = changes.find((c) => c.k === 0)?.set || {};
+      const inner = changes.filter((c) => c.k).map(({ tag, set }) => {
+        const own = Object.fromEntries(Object.entries(set).filter(([p, v]) => !(p === 'color' && self.color && v[1] === self.color[1])));
+        return { tag, set: own };
+      }).filter((c) => Object.keys(c.set).length);
+      out.push({ ...d, tags: undefined, self, inner });
+    }
+    await cdp.detach().catch(() => {});
+  }
+  await page.evaluate(() => { document.getElementById('c2t-still')?.remove(); document.querySelectorAll('[data-c2t-hov]').forEach((n) => n.removeAttribute('data-c2t-hov')); });
+  return out;
 }
 
 async function autoScroll(page) {

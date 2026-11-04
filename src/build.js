@@ -79,15 +79,51 @@ function themeJson(t, presets) {
       elements: {
         heading: { typography: { fontFamily: heading, lineHeight: '1.2' } },
         ...headingLevels(t.headings || {}),
-        link: { color: { text: color('primary') || color('contrast') } },
-        button: { color: { background: color('primary') || color('contrast'), text: color('base') } },
+        link: { color: { text: color('primary') || color('contrast') }, ...hoverOf(t.hover?.kinds?.link) },
+        button: { color: { background: color('primary') || color('contrast'), text: color('base') }, ...hoverOf(t.hover?.kinds?.button, true) },
       },
+      ...(hoverOf(t.hover?.kinds?.nav)[':hover'] ? { blocks: { 'core/navigation': { elements: { link: hoverOf(t.hover.kinds.nav) } } } } : {}),
+      ...(hoverCss(t.hover) ? { css: hoverCss(t.hover) } : {}),
     },
     templateParts: [
       { name: 'header', title: 'Header', area: 'header' },
       { name: 'footer', title: 'Footer', area: 'footer' },
     ],
   };
+}
+
+// Hover states measured on the original (see hoverTokens): the common change per kind of element.
+function hoverOf(k, button = false) {
+  const top = k?.top;
+  if (!top) return {};
+  const color = { ...(top.color ? { text: top.color } : {}), ...(button && top.background ? { background: top.background } : {}) };
+  const h = {
+    ...(Object.keys(color).length ? { color } : {}),
+    ...(top.decoration ? { typography: { textDecoration: top.decoration } } : {}),
+    ...(button && top.border ? { border: { color: top.border } } : {}),
+  };
+  return Object.keys(h).length ? { ':hover': h } : {};
+}
+// What theme.json can't say (fades, shadows, lifts, card states) as a few lines of CSS, editable later
+// under Styles > Additional CSS.
+function hoverCss(hv) {
+  if (!hv) return '';
+  const k = hv.kinds || {};
+  const rules = [];
+  const fx = (top) => [top.opacity ? `opacity:${top.opacity}` : '', top.shadow ? `box-shadow:${top.shadow}` : '', top.lift ? `transform:${top.lift}` : ''].filter(Boolean).join(';');
+  const add = (sel, top) => { const f = top && fx(top); if (f) rules.push(`${sel}{${f}}`); };
+  add('a:where(:not(.wp-element-button)):hover', k.link?.top);
+  add('.wp-block-navigation a:hover', k.nav?.top);
+  add('.wp-element-button:hover', k.button?.top);
+  add('.wp-block-image a:hover', k.image?.top);
+  const card = k.card?.top;
+  if (card && hv.cards?.length) {
+    add('.is-style-c2t-card:hover', card);
+    if (card.color) rules.push(`.is-style-c2t-card:hover,.is-style-c2t-card:hover a{color:${card.color}}`);
+    if (card.zoom) rules.push('.is-style-c2t-card .wp-block-image{overflow:hidden}.is-style-c2t-card:hover img{transform:scale(1.05)}');
+  }
+  if (!rules.length) return '';
+  return `a,.wp-element-button,.is-style-c2t-card,.is-style-c2t-card img{transition:color .2s,background-color .2s,border-color .2s,opacity .2s,box-shadow .2s,transform .2s}${rules.join('')}`;
 }
 
 // h1-h6 sizes and styles measured on the original, one element entry per level.

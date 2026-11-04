@@ -200,5 +200,60 @@ export function buildTokens(dom) {
     bodySize: t.fontSizes[0]?.value || '16px',
     contentSize: `${widths[0] || 1200}px`,
     darkBase: lum(base) < 0.2,
+    hover: hoverTokens(dom.hovers),
+  };
+}
+
+// Hover inventory: per kind of element (link, nav, button, card, image), what changes on hover and the
+// most common change, as theme-ready values. Effects theme.json can't express go into `css`.
+export function hoverTokens(hovers = []) {
+  const to = (h, p) => h.self?.[p]?.[1];
+  const effects = (h) => {
+    const s = h.self || {}, inner = h.inner || [];
+    const fx = [];
+    if (s.color) fx.push('color');
+    if (s.backgroundColor) fx.push('background');
+    if (s.borderTopColor && s.borderTopColor[1]) fx.push('border');
+    if (s.textDecorationLine) fx.push(/underline/.test(s.textDecorationLine[1]) ? 'underline' : 'no-underline');
+    if (s.opacity && parseFloat(s.opacity[1]) < parseFloat(s.opacity[0])) fx.push('fade');
+    if (s.boxShadow && s.boxShadow[1] !== 'none') fx.push('shadow');
+    if (s.transform && /matrix\(1, 0, 0, 1, [-\d.]+, -/.test(s.transform[1])) fx.push('lift');
+    if (inner.some((c) => /^(IMG|PICTURE)$/.test(c.tag) && c.set.transform && /matrix\(1\.0*[1-9]/.test(c.set.transform[1]))) fx.push('zoom');
+    if (inner.some((c) => /^(IMG|PICTURE)$/.test(c.tag) && c.set.opacity)) fx.push('image-fade');
+    if (inner.some((c) => !/^(IMG|PICTURE)$/.test(c.tag) && c.set.color)) fx.push('inner-color');
+    return fx;
+  };
+  const kinds = {};
+  for (const h of hovers) {
+    const k = (kinds[h.kind] ||= { of: 0, changed: 0, effects: {}, sigs: {} });
+    k.of++;
+    const fx = effects(h);
+    if (!fx.length) continue;
+    k.changed++;
+    fx.forEach((e) => { k.effects[e] = (k.effects[e] || 0) + 1; });
+    const top = {
+      color: hex(to(h, 'color') || ''), background: hex(to(h, 'backgroundColor') || ''), border: hex(to(h, 'borderTopColor') || ''),
+      decoration: h.self?.textDecorationLine?.[1], opacity: to(h, 'opacity'), shadow: fx.includes('shadow') ? to(h, 'boxShadow') : undefined,
+      lift: fx.includes('lift') ? to(h, 'transform') : undefined, zoom: fx.includes('zoom') || undefined,
+    };
+    const key = JSON.stringify(top);
+    (k.sigs[key] ||= { ...JSON.parse(key), count: 0 }).count++;
+  }
+  const bySection = {};
+  for (const h of hovers) {
+    if (!['link', 'nav'].includes(h.kind) || !to(h, 'color')) continue;
+    const m = (bySection[h.section] ||= {});
+    const c = hex(to(h, 'color'));
+    if (c) m[c] = (m[c] || 0) + 1;
+  }
+  return {
+    kinds: Object.fromEntries(Object.entries(kinds).map(([name, k]) => {
+      const top = Object.values(k.sigs).sort((a, b) => b.count - a.count)[0];
+      // A state is applied when it's the clear habit: half the elements of that kind change, and most of them alike.
+      const apply = top && k.changed >= k.of * 0.5 && top.count >= Math.max(2, k.changed * 0.4);
+      return [name, { of: k.of, changed: k.changed, effects: k.effects, top: apply ? top : null }];
+    })),
+    cards: hovers.filter((h) => h.kind === 'card' && effects(h).length).map((h) => h.id).filter(Boolean),
+    bySection: Object.fromEntries(Object.entries(bySection).map(([id, m]) => [id, Object.entries(m).sort((a, b) => b[1] - a[1])[0][0]])),
   };
 }
